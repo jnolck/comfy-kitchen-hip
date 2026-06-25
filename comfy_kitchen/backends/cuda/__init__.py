@@ -27,6 +27,9 @@ __all__ = [
     "apply_rope_split_half1",
     "dequantize_nvfp4",
     "dequantize_per_tensor_fp8",
+    "int8_linear",
+    "quantize_int8_rowwise",
+    "quantize_and_rotate_rowwise",
     "gemv_awq_w4a16",
     "quantize_mxfp8",
     "quantize_nvfp4",
@@ -312,6 +315,18 @@ def dequantize_nvfp4(
     return output
 
 
+def quantize_int8_rowwise(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Quantize tensor to INT8 with per-row scales (for activations)."""
+    from comfy_kitchen.backends.eager.quantization import quantize_int8_rowwise as eager_quantize
+    return eager_quantize(x)
+
+
+def quantize_and_rotate_rowwise(x: torch.Tensor, H: torch.Tensor, group_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Fused online activation rotation + row-wise quantization."""
+    from comfy_kitchen.backends.eager.quantization import quantize_and_rotate_rowwise as eager_quantize_rotate
+    return eager_quantize_rotate(x, H, group_size)
+
+
 def quantize_mxfp8(
     x: torch.Tensor,
     pad_32x: bool = False,
@@ -473,6 +488,50 @@ def scaled_mm_nvfp4(
     )
 
     return out
+
+
+def int8_linear(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    bias: torch.Tensor = None,
+    out_dtype: torch.dtype = None,
+    convrot: bool = False,
+    convrot_groupsize: int = 256,
+) -> torch.Tensor:
+    if convrot:
+        from comfy_kitchen.tensor.int8 import _build_hadamard, _rotate_activation
+        H = _build_hadamard(convrot_groupsize, device=x.device, dtype=x.dtype)
+        x = _rotate_activation(x, H, convrot_groupsize)
+
+    # cuBLAS INT8 GEMM requires row-wise quantized activations and tensor-wise quantized weights
+    x_qdata, x_scale = torch.ops.comfy_kitchen.quantize_int8_rowwise(x)
+
+    m, k = x.shape
+    n, k_w = weight.shape
+    assert k == k_w, "Input and weight inner dimensions must match"
+
+    # cuBLAS INT8 GEMM outputs int32
+    out_int32 = torch.empty((m, n), dtype=torch.int32, device=x.device)
+    stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
+
+    _C.cublas_gemm_int8(
+        _wrap_for_dlpack(x_qdata),
+        _wrap_for_dlpack(weight),
+        _wrap_for_dlpack(out_int32),
+        _wrap_for_dlpack(get_cublas_workspace()),
+        stream_ptr,
+    )
+
+    # Dequantize/Rescale using eager-friendly operations
+    weight_scale = weight_scale.view(-1)
+    out = out_int32.float() * (x_scale * weight_scale)
+
+    if bias is not None:
+        out += bias.float()
+
+    out_dtype = out_dtype or x.dtype
+    return out.to(out_dtype)
 
 
 def adaln(x: torch.Tensor, scale: torch.Tensor, shift: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
@@ -1054,6 +1113,67 @@ def _build_constraints() -> dict:
                 "freqs_cis": ParamConstraint(
                     dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
                     shape_rules=(ExactDims(6),),
+                ),
+            },
+            default_devices=cuda_devices,
+        ),
+        "int8_linear": FunctionConstraints(
+            params={
+                "x": ParamConstraint(
+                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+                    shape_rules=(ExactDims(2),),
+                ),
+                "weight": ParamConstraint(
+                    dtypes=frozenset({torch.int8}),
+                    shape_rules=(ExactDims(2),),
+                ),
+                "weight_scale": ParamConstraint(
+                    dtypes=frozenset({torch.float32}),
+                ),
+                "out_dtype": ParamConstraint(
+                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+                ),
+                "convrot": ParamConstraint(dtypes=frozenset({bool})),
+                "convrot_groupsize": ParamConstraint(dtypes=frozenset({int})),
+            },
+            default_devices=cuda_devices,
+            min_compute_capability=(7, 5),
+        ),
+        "quantize_int8_tensorwise": FunctionConstraints(
+            params={
+                "x": ParamConstraint(
+                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+                ),
+            },
+            default_devices=cuda_devices,
+        ),
+        "quantize_int8_rowwise": FunctionConstraints(
+            params={
+                "x": ParamConstraint(
+                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+                ),
+            },
+            default_devices=cuda_devices,
+        ),
+        "quantize_and_rotate_rowwise": FunctionConstraints(
+            params={
+                "x": ParamConstraint(
+                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+                ),
+                "H": ParamConstraint(
+                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+                ),
+                "group_size": ParamConstraint(dtypes=frozenset({int})),
+            },
+            default_devices=cuda_devices,
+        ),
+        "dequantize_int8_simple": FunctionConstraints(
+            params={
+                "q": ParamConstraint(
+                    dtypes=frozenset({torch.int8}),
+                ),
+                "scale": ParamConstraint(
+                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
                 ),
             },
             default_devices=cuda_devices,
