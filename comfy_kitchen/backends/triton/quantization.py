@@ -800,14 +800,24 @@ def _quantize_rowwise_kernel(
     # 3. Quantize
     q_f = x / scale
 
-    # Round and Clamp
-    rounding_bias = tl.where(q_f >= 0, 0.5, -0.5)
-    q_i = q_f + rounding_bias
-
-    # Clamp in float (HIP only supports float clamp)
-    q_i = tl.clamp(q_i, -128.0, 127.0)
+    # Round half-to-even (emulates libdevice.rint for HIP compat)
+    # Triton 3.6.0 HIP backend lacks rint, math.round, and integer clamp
+    floor_val = tl.floor(q_f)
+    frac = q_f - floor_val
+    
+    # Standard round: floor(x + 0.5)
+    standard = tl.floor(q_f + 0.5)
+    
+    # For exactly .5: round to nearest even
+    # floor_val % 2.0 == 1.0 means odd floor, so add 1 to round up to even
+    q_i = tl.where(
+        frac == 0.5,
+        floor_val + (floor_val % 2.0),  # odd->+1 (round up), even->+0 (stay)
+        standard
+    )
 
     # Convert to int for storage
+    q_i = tl.clamp(q_i, -128.0, 127.0)
     q_i = q_i.to(tl.int32)
 
     # 4. Store
