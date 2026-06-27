@@ -812,7 +812,7 @@ def _quantize_rowwise_kernel(
     # floor_val % 2.0 == 1.0 means odd floor, so add 1 to round up to even
     q_i = tl.where(
         frac == 0.5,
-        floor_val + (floor_val % 2.0),  # odd->+1 (round up), even->+0 (stay)
+        floor_val + is_odd,
         standard
     )
 
