@@ -810,6 +810,7 @@ def _quantize_rowwise_kernel(
     
     # For exactly .5: round to nearest even
     # floor_val % 2.0 == 1.0 means odd floor, so add 1 to round up to even
+    is_odd = tl.abs(floor_val) % 2.0 == 1.0
     q_i = tl.where(
         frac == 0.5,
         floor_val + is_odd,
