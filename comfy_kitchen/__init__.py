@@ -1,6 +1,8 @@
 import torch
 
 from .backends import cuda as _cuda_backend  # noqa: F401
+from .backends import rocm as _rocm_backend
+from .backends import hip as _hip_backend
 
 # Import backends to trigger auto-registration
 from .backends import eager as _eager_backend  # noqa: F401
@@ -17,6 +19,8 @@ from .float_utils import from_blocked, swap_nibbles, to_blocked
 
 # Import registry and exceptions
 from .registry import registry
+
+registry.set_priority(["hip", "rocm", "triton", "eager"])
 
 __version__ = "0.1.0"
 
@@ -193,7 +197,9 @@ def dequantize_nvfp4(
         Dequantized tensor in specified output format
     """
     dtype_code = DTYPE_TO_CODE[output_type]
-    return torch.ops.comfy_kitchen.dequantize_nvfp4(qx, per_tensor_scale, block_scales, dtype_code, hi_first)
+    return torch.ops.comfy_kitchen.dequantize_nvfp4(
+        qx, per_tensor_scale, block_scales, dtype_code, hi_first
+    )
 
 
 def scaled_mm_nvfp4(
@@ -229,8 +235,7 @@ def scaled_mm_nvfp4(
         out_dtype = torch.bfloat16
     dtype_code = DTYPE_TO_CODE[out_dtype]
     return torch.ops.comfy_kitchen.scaled_mm_nvfp4(
-        a, b, tensor_scale_a, tensor_scale_b,
-        block_scale_a, block_scale_b, bias, dtype_code, alpha
+        a, b, tensor_scale_a, tensor_scale_b, block_scale_a, block_scale_b, bias, dtype_code, alpha
     )
 
 
@@ -333,7 +338,12 @@ def quantize_svdquant_w4a4(
     as bf16/fp16; this avoids an otherwise redundant cast/allocation.
     """
     return torch.ops.comfy_kitchen.quantize_svdquant_w4a4(
-        x, smooth, lora_down, pad_size, act_unsigned, lora_x,
+        x,
+        smooth,
+        lora_down,
+        pad_size,
+        act_unsigned,
+        lora_x,
     )
 
 
@@ -397,9 +407,7 @@ def gemv_awq_w4a16(
     Returns:
         (..., N) output tensor.
     """
-    return torch.ops.comfy_kitchen.gemv_awq_w4a16(
-        x, qweight, wscales, wzeros, bias, group_size
-    )
+    return torch.ops.comfy_kitchen.gemv_awq_w4a16(x, qweight, wscales, wzeros, bias, group_size)
 
 
 def apply_rope(
