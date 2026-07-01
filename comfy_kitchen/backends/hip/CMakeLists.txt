@@ -5,9 +5,24 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 project(comfy_kitchen_rocm LANGUAGES CXX HIP)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Find ROCm/HIP
 find_package(hip REQUIRED)
 find_package(rocblas REQUIRED)
+find_package(composable_kernel QUIET)
+
+if(composable_kernel_FOUND)
+        add_definitions(-DCOMFY_HAVE_CK)
+else()
+        message(WARNING "Composable Kernel not found, falling back to hipBLASLt only")
+endif()
+
+if(composable_kernel_FOUND)
+        target_link_libraries(_C PRIVATE
+        composable_kernel::device
+    )
+endif()
 
 # Find Python
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
