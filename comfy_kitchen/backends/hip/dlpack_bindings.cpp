@@ -127,12 +127,12 @@ void launch_apply_rope_kernel(
 //                              *out, int M, int N, int K, int G, int
 //                              dtype_code, hipStream_t stream);
 //
-// // Fused AdaLN — see ops/adaln.cu.
-// void launch_adaln_kernel(const void *x, const void *scale, const void *shift,
-//                          void *out, int64_t N, int64_t D, int64_t
-//                          scale_group, int64_t shift_group, float eps, int
-//                          dtype_code, hipStream_t stream);
-// }
+// Fused AdaLN — see ops/adaln.cu.
+void launch_adaln_kernel(const void *x, const void *scale, const void *shift,
+                         void *out, int64_t N, int64_t D, int64_t scale_group,
+                         int64_t shift_group, float eps, int dtype_code,
+                         hipStream_t stream);
+}
 //
 // // Nanobind wrapper for quantize_per_tensor_fp8
 // void quantize_per_tensor_fp8(nb::ndarray<> input,
@@ -212,7 +212,7 @@ void launch_apply_rope_kernel(
 //   numel,
 //                                      rng_dtype_code, input_dtype_code,
 //                                      output_dtype_code, stream);
-}
+//}
 
 // // Nanobind wrapper for cublas_gemm_blockwise_fp4
 // void cublas_gemm_blockwise_fp4(
@@ -568,17 +568,15 @@ void apply_rope(nb::ndarray<> xq, nb::ndarray<> freqs, nb::ndarray<> xq_out,
 //                           dtype_code, stream);
 // }
 //
-// // Nanobind wrapper for fused AdaLN
-// void adaln(nb::ndarray<> x, nb::ndarray<>
-// scale,
-//            nb::ndarray<> shift,
-//            nb::ndarray<> out, int64_t N, int64_t D,
-//            int64_t scale_group, int64_t shift_group, float eps, int
-//            dtype_code, uintptr_t stream_ptr) {
-//   hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
-//   launch_adaln_kernel(x.data(), scale.data(), shift.data(), out.data(), N, D,
-//                       scale_group, shift_group, eps, dtype_code, stream);
-// }
+// Nanobind wrapper for fused AdaLN
+void adaln(nb::ndarray<> x, nb::ndarray<> scale, nb::ndarray<> shift,
+           nb::ndarray<> out, int64_t N, int64_t D, int64_t scale_group,
+           int64_t shift_group, float eps, int dtype_code,
+           uintptr_t stream_ptr) {
+  hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+  launch_adaln_kernel(x.data(), scale.data(), shift.data(), out.data(), N, D,
+                      scale_group, shift_group, eps, dtype_code, stream);
+}
 
 // Python module definition
 extern "C" {
@@ -868,11 +866,11 @@ NB_MODULE(_C, m) {
   //       nb::arg("wzeros"), nb::arg("out"), nb::arg("group_size"),
   //       nb::arg("stream_ptr"));
   //
-  // m.def("adaln", &adaln, "Fused AdaLN: layernorm(x) * (1 + scale) + shift",
-  //       nb::arg("x"), nb::arg("scale"), nb::arg("shift"), nb::arg("out"),
-  //       nb::arg("N"), nb::arg("D"), nb::arg("scale_group"),
-  //       nb::arg("shift_group"), nb::arg("eps"), nb::arg("dtype_code"),
-  //       nb::arg("stream_ptr"));
+  m.def("adaln", &adaln, "Fused AdaLN: layernorm(x) * (1 + scale) + shift",
+        nb::arg("x"), nb::arg("scale"), nb::arg("shift"), nb::arg("out"),
+        nb::arg("N"), nb::arg("D"), nb::arg("scale_group"),
+        nb::arg("shift_group"), nb::arg("eps"), nb::arg("dtype_code"),
+        nb::arg("stream_ptr"));
 
   // Feature availability flag (computed at module load time)
   m.attr("HAS_CUBLASLT") = comfy::HipblasLtRuntime::instance().is_available();

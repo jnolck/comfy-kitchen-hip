@@ -47,6 +47,7 @@ set(HIP_SOURCES
     ops/int8_linear.cu
     ops/cublas_gemm_int8.cu
     ops/apply_rope.cu
+    ops/adaln.cu
 )
 
 # Tell CMake which compiler to use for each source
