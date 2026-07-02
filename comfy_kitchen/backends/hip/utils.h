@@ -17,10 +17,10 @@
 #ifndef COMFY_UTILS_CUH_
 #define COMFY_UTILS_CUH_
 
-#include <hip/hip_runtime.h>
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_fp8.h>
+#include <hip/hip_runtime.h>
 #if CUDA_VERSION >= 12080
 #include <hip/hip_fp4.h>
 #endif
@@ -49,10 +49,10 @@ __device__ __constant__ float zero_device;
 // Helper macro for CUDA error checking (replaces C10_CUDA_CHECK)
 #define CUDA_CHECK(call)                                                       \
   do {                                                                         \
-    hipError_t err = call;                                                    \
-    if (err != hipSuccess) {                                                  \
+    hipError_t err = call;                                                     \
+    if (err != hipSuccess) {                                                   \
       throw std::runtime_error(std::string("CUDA error: ") +                   \
-                               hipGetErrorString(err));                       \
+                               hipGetErrorString(err));                        \
     }                                                                          \
   } while (0)
 
@@ -72,7 +72,8 @@ inline float *GetScalarZero() {
   static std::once_flag init_flag;
   std::call_once(init_flag, []() {
     float zero = 0.0f;
-    CUDA_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(zero_device), &zero, sizeof(float)));
+    CUDA_CHECK(
+        hipMemcpyToSymbol(HIP_SYMBOL(zero_device), &zero, sizeof(float)));
   });
   // return address by cudaGetSymbolAddress
   float *dev_ptr;

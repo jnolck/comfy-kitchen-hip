@@ -10,19 +10,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Find ROCm/HIP
 find_package(hip REQUIRED)
 find_package(rocblas REQUIRED)
-find_package(composable_kernel QUIET)
-
-if(composable_kernel_FOUND)
-        add_definitions(-DCOMFY_HAVE_CK)
-else()
-        message(WARNING "Composable Kernel not found, falling back to hipBLASLt only")
-endif()
-
-if(composable_kernel_FOUND)
-        target_link_libraries(_C PRIVATE
-        composable_kernel::device
-    )
-endif()
 
 # Find Python
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
@@ -41,31 +28,18 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH "${NB_DIR}")
 find_package(nanobind CONFIG REQUIRED)
 
-# HIP flags
-set(HIP_FLAGS
-    -fvisibility=hidden
-    -fdiagnostics-color=always
-)
-
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(HIP_FLAGS ${HIP_FLAGS} -g -O0)
-else()
-        set(HIP_FLAGS ${HIP_FLAGS} -O3)
-endif()
-
 set(CPP_SOURCES
     dlpack_bindings.cpp
 )
 
-# Source files
 set(HIP_SOURCES
     ops/int8_linear.cu
     ops/cublas_gemm_int8.cu
+    ops/ck_gemm_int8.cu
     ops/apply_rope.cu
     ops/adaln.cu
 )
 
-# Tell CMake which compiler to use for each source
 set_source_files_properties(${CPP_SOURCES} PROPERTIES LANGUAGE CXX)
 set_source_files_properties(${HIP_SOURCES} PROPERTIES LANGUAGE HIP)
 
@@ -98,6 +72,27 @@ target_include_directories(_C PRIVATE
     ${ROCM_PATH}/include/hipblas
 )
 
+if(NOT DEFINED COMFY_CK_DIR)
+        set(COMFY_CK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include")
+endif()
+if(EXISTS "${COMFY_CK_DIR}/ck_tile/core.hpp")
+        message(STATUS "CK found: ${COMFY_CK_DIR}")
+        target_include_directories(_C PRIVATE ${COMFY_CK_DIR})
+        target_compile_definitions(_C PRIVATE COMFY_HAVE_CK)
+else()
+        message(STATUS "CK not found at ${COMFY_CK_DIR} - fused int8 GEMM uses hipBLASLt only")
+endif()
+
+# CK include directories (header-only)
+# if(EXISTS "${CK_DIR}/include")
+#         target_include_directories(_C PRIVATE
+#         ${CK_DIR}/include
+#         ${CK_DIR}/include/ck
+#         ${CK_DIR}/include/ck_tile
+#         ${CK_DIR}/library/include
+# )
+# endif()
+
 # Link libraries
 target_link_libraries(_C PRIVATE
     hip::host
@@ -105,6 +100,11 @@ target_link_libraries(_C PRIVATE
     roc::rocblas
     ${CMAKE_DL_LIBS}
 )
+
+# After the _C target is created
+if(TARGET composable_kernel::device)
+        target_link_libraries(_C PRIVATE composable_kernel::device)
+endif()
 
 # RPATH
 set_target_properties(_C PROPERTIES
