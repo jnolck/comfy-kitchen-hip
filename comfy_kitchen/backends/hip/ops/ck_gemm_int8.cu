@@ -51,7 +51,7 @@ struct FusedDequantEpilogue {
 // GemmConfig for RDNA3 WMMA int8
 // ============================================================================
 template <int TBM, int TBN, int TBK, int WM, int WN, int WK, int WTM, int WTN,
-          int WTK>
+          int WTK, int BlockPerCu>
 struct GemmConfigInt8WMMA {
   static constexpr ck_tile::index_t M_Tile = TBM;
   static constexpr ck_tile::index_t N_Tile = TBN;
@@ -62,6 +62,7 @@ struct GemmConfigInt8WMMA {
   static constexpr ck_tile::index_t M_Warp_Tile = WTM;
   static constexpr ck_tile::index_t N_Warp_Tile = WTN;
   static constexpr ck_tile::index_t K_Warp_Tile = WTK;
+  static constexpr int kBlockPerCu = BlockPerCu;
 
   static constexpr bool kPadM = true;
   static constexpr bool kPadN = true;
@@ -71,7 +72,7 @@ struct GemmConfigInt8WMMA {
   static constexpr bool TransposeC = false;
   static constexpr bool UseStructuredSparsity = false;
 
-  static constexpr int kBlockPerCu = 2;
+  // static constexpr int kBlockPerCu = 2;
   static constexpr ck_tile::index_t TileParitionerGroupNum = 8;
   static constexpr ck_tile::index_t TileParitionerM01 = 4;
   static constexpr auto Scheduler = ck_tile::GemmPipelineScheduler::Intrawave;
@@ -101,7 +102,7 @@ __global__ void broadcast_col(const float *src, float *dst, int M, int N) {
 // One fused int8 GEMM instance
 // ============================================================================
 template <typename ElementOutput, int TBM, int TBN, int TBK, int WM, int WN,
-          int WK, int WTM, int WTN, int WTK>
+          int WK, int WTM, int WTN, int WTK, int kBlockPerCu>
 struct FusedInt8GemmCKTile {
   using ADataType = ck_tile::int8_t;
   using BDataType = ck_tile::int8_t;
@@ -120,7 +121,7 @@ struct FusedInt8GemmCKTile {
       ck_tile::tuple<ELayout, ELayout, ELayout>; // all RowMajor [M,N]
 
   using GemmConfig =
-      GemmConfigInt8WMMA<TBM, TBN, TBK, WM, WN, WK, WTM, WTN, WTK>;
+      GemmConfigInt8WMMA<TBM, TBN, TBK, WM, WN, WK, WTM, WTN, WTK, kBlockPerCu>;
 
   using GemmShape = ck_tile::TileGemmShape<
       ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile,
@@ -162,18 +163,18 @@ struct FusedInt8GemmCKTile {
                   int N, int K, hipStream_t stream) {
     // printf("CK run: M=%d N=%d K=%d TBM=%d TBN=%d TBK=%d\n", M, N, K, TBM,
     // TBN, TBK);
-
-    // Broadcast vectors to [M,N] tensors (CK requires full 2D for D
-    // tensors)
     float *d_xs_full, *d_ws_full, *d_bias_full;
-    CUDA_CHECK(hipMalloc(&d_xs_full, M * N * sizeof(float)));
-    CUDA_CHECK(hipMalloc(&d_ws_full, M * N * sizeof(float)));
-    CUDA_CHECK(hipMalloc(&d_bias_full, M * N * sizeof(float)));
+    hipMalloc(&d_xs_full, M * N * sizeof(float));
+    hipMalloc(&d_ws_full, M * N * sizeof(float));
+    hipMalloc(&d_bias_full, M * N * sizeof(float));
 
-    // Line 166 area:
     int bcast_threads = 256;
     int bcast_blocks = (M * N + bcast_threads - 1) / bcast_threads;
 
+    broadcast_row<<<bcast_blocks, bcast_threads, 0, stream>>>(xs, d_xs_full, M,
+                                                              N);
+    broadcast_col<<<bcast_blocks, bcast_threads, 0, stream>>>(ws, d_ws_full, M,
+                                                              N);
     if (bias == nullptr) {
       CUDA_CHECK(hipMemsetAsync(d_bias_full, 0, M * N * sizeof(float), stream));
     } else {
@@ -181,20 +182,13 @@ struct FusedInt8GemmCKTile {
           bias, d_bias_full, M, N);
     }
 
-    broadcast_row<<<bcast_blocks, bcast_threads, 0, stream>>>(xs, d_xs_full, M,
-                                                              N);
-    broadcast_col<<<bcast_blocks, bcast_threads, 0, stream>>>(ws, d_ws_full, M,
-                                                              N);
-    broadcast_col<<<bcast_blocks, bcast_threads, 0, stream>>>(bias, d_bias_full,
-                                                              M, N);
-
     CUDA_CHECK(hipStreamSynchronize(stream));
     auto err = hipGetLastError();
     if (err != hipSuccess) {
-      printf("  broadcast failed: %s\n", hipGetErrorString(err));
       hipFree(d_xs_full);
       hipFree(d_ws_full);
       hipFree(d_bias_full);
+      printf("  broadcast failed: %s\n", hipGetErrorString(err));
       return false;
     }
     // printf("  broadcast OK\n");
@@ -220,9 +214,9 @@ struct FusedInt8GemmCKTile {
     auto kargs = Kernel::MakeKernelArgs(args);
 
     if (!Kernel::IsSupportedArgument(kargs)) {
-      (void)hipFree(d_xs_full);
-      (void)hipFree(d_ws_full);
-      (void)hipFree(d_bias_full);
+      hipFree(d_xs_full);
+      hipFree(d_ws_full);
+      hipFree(d_bias_full);
       return false;
     }
 
@@ -236,14 +230,18 @@ struct FusedInt8GemmCKTile {
         ck_tile::launch_kernel(s, ck_tile::make_kernel<GemmConfig::kBlockPerCu>(
                                       Kernel{}, grids, blocks, 0, kargs));
 
-    CUDA_CHECK(hipStreamSynchronize(stream));
+    // CUDA_CHECK(hipStreamSynchronize(stream));
     err = hipGetLastError();
     if (err != hipSuccess) {
+      hipFree(d_xs_full);
+      hipFree(d_ws_full);
+      hipFree(d_bias_full);
       printf("  kernel error: %s\n", hipGetErrorString(err));
+      return false;
     }
-    CUDA_CHECK(hipFree(d_xs_full));
-    CUDA_CHECK(hipFree(d_ws_full));
-    CUDA_CHECK(hipFree(d_bias_full));
+    hipFree(d_xs_full);
+    hipFree(d_ws_full);
+    hipFree(d_bias_full);
     return elapsed >= 0;
   }
 };
@@ -261,13 +259,13 @@ bool dispatch_fused_ck(const int8_t *A, const int8_t *B, const float *xs,
                const float *, OutT *, int, int, int, hipStream_t);
 
   static const Fn runners[] = {
-      &FusedInt8GemmCKTile<OutT, 128, 128, 64, 4, 2, 1, 16, 16, 16>::run,
-      &FusedInt8GemmCKTile<OutT, 128, 256, 64, 4, 2, 1, 16, 16, 16>::run,
-      &FusedInt8GemmCKTile<OutT, 256, 128, 64, 4, 2, 1, 16, 16, 16>::run,
-      &FusedInt8GemmCKTile<OutT, 64, 64, 32, 2, 2, 1, 16, 16, 16>::run,
-      &FusedInt8GemmCKTile<OutT, 64, 128, 32, 2, 2, 1, 16, 16, 16>::run,
-      &FusedInt8GemmCKTile<OutT, 128, 64, 32, 2, 2, 1, 16, 16, 16>::run,
-      &FusedInt8GemmCKTile<OutT, 32, 64, 32, 1, 2, 1, 16, 16, 16>::run,
+      &FusedInt8GemmCKTile<OutT, 128, 128, 64, 4, 2, 1, 16, 16, 16, 1>::run,
+      &FusedInt8GemmCKTile<OutT, 128, 256, 64, 4, 2, 1, 16, 16, 16, 2>::run,
+      &FusedInt8GemmCKTile<OutT, 256, 128, 64, 4, 2, 1, 16, 16, 16, 2>::run,
+      &FusedInt8GemmCKTile<OutT, 64, 64, 32, 2, 2, 1, 16, 16, 16, 1>::run,
+      &FusedInt8GemmCKTile<OutT, 64, 128, 32, 2, 2, 1, 16, 16, 16, 1>::run,
+      &FusedInt8GemmCKTile<OutT, 128, 64, 32, 2, 2, 1, 16, 16, 16, 2>::run,
+      &FusedInt8GemmCKTile<OutT, 32, 64, 32, 1, 2, 1, 16, 16, 16, 1>::run,
   };
   constexpr int NC = sizeof(runners) / sizeof(runners[0]);
 
@@ -293,7 +291,7 @@ bool dispatch_fused_ck(const int8_t *A, const int8_t *B, const float *xs,
       if (!runners[i](A, B, xs, ws, bias, D, M, N, K, stream))
         continue;
 
-      CUDA_CHECK(hipStreamSynchronize(stream));
+      // CUDA_CHECK(hipStreamSynchronize(stream));
       CUDA_CHECK(hipEventRecord(s, stream));
       for (int r = 0; r < 3; ++r) {
         runners[i](A, B, xs, ws, bias, D, M, N, K, stream);

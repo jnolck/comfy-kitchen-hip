@@ -3,6 +3,16 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message(STATUS "Debug build enabled")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0")
+        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -g -O0")
+else()
+        message(STATUS "Release build enabled")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -O3")
+endif()
+
 project(comfy_kitchen_rocm LANGUAGES CXX HIP)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -48,20 +58,20 @@ nanobind_add_module(_C NB_STATIC STABLE_ABI LTO ${CPP_SOURCES} ${HIP_SOURCES})
 set_target_properties(_C PROPERTIES SUFFIX ".abi3.so")
 target_compile_definitions(_C PRIVATE Py_LIMITED_API=0x030C0000 NB_STATIC)
 
-# CXX-only flags
-target_compile_options(_C PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:-fvisibility=hidden>
-    $<$<COMPILE_LANGUAGE:CXX>:-fdiagnostics-color=always>
-    $<$<COMPILE_LANGUAGE:CXX>:-O3>
-)
-
-# HIP-only flags
-target_compile_options(_C PRIVATE
-    $<$<COMPILE_LANGUAGE:HIP>:-fvisibility=hidden>
-    $<$<COMPILE_LANGUAGE:HIP>:-fdiagnostics-color=always>
-    $<$<COMPILE_LANGUAGE:HIP>:--offload-arch=gfx1100>
-    $<$<COMPILE_LANGUAGE:HIP>:-O3>
-)
+# # CXX-only flags
+# target_compile_options(_C PRIVATE
+#     $<$<COMPILE_LANGUAGE:CXX>:-fvisibility=hidden>
+#     $<$<COMPILE_LANGUAGE:CXX>:-fdiagnostics-color=always>
+#     $<$<COMPILE_LANGUAGE:CXX>:-O3>
+# )
+#
+# # HIP-only flags
+# target_compile_options(_C PRIVATE
+#     $<$<COMPILE_LANGUAGE:HIP>:-fvisibility=hidden>
+#     $<$<COMPILE_LANGUAGE:HIP>:-fdiagnostics-color=always>
+#     $<$<COMPILE_LANGUAGE:HIP>:--offload-arch=gfx1100>
+#     $<$<COMPILE_LANGUAGE:HIP>:-O3>
+# )
 
 # Include directories
 target_include_directories(_C PRIVATE

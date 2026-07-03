@@ -43,7 +43,6 @@ __all__ = [
     # "stochastic_rounding_fp8",
 ]
 
-
 _dll_handle = None
 # try:
 #     try:
@@ -758,8 +757,8 @@ def int8_linear(
         bias_f32 = torch.zeros(n, dtype=torch.float32, device=x.device)
 
     used_cutlass = False
-    # if not _DISABLE_CUTLASS_INT8 and _cuda_device_supports_cutlass_int8_dequant(x_qdata):
-    if False:
+    if not _DISABLE_CUTLASS_INT8 and _cuda_device_supports_cutlass_int8_dequant(x_qdata):
+        # if False:
         used_cutlass = _C.cutlass_int8_dequant(
             _wrap_for_dlpack(x_qdata),
             _wrap_for_dlpack(weight),
@@ -774,9 +773,10 @@ def int8_linear(
     if not used_cutlass:
         # Fallback: cuBLAS int8 GEMM (int32) + separate dequant kernel.
         use_turing_padding = x_qdata.is_cuda and _cuda_device_is_turing(x_qdata.get_device())
+        # if False:
         if use_turing_padding:
             padded_k = _round_up(k, 16)
-            padded_n = _round_up(n, _cublas_int8_n_alignment(x_qdata))
+            padded_n = _round_up(n, _hipblas_int8_n_alignment(x_qdata))
             cublas_x = _pad_2d_cols(x_qdata, padded_k)
             cublas_weight = _pad_2d_rows(_pad_2d_cols(weight, padded_k), padded_n)
         else:
