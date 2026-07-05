@@ -17,12 +17,12 @@
 #ifndef COMFY_UTILS_CUH_
 #define COMFY_UTILS_CUH_
 
-#include <cuda.h>
-#include <cuda_bf16.h>
-#include <cuda_fp16.h>
-#include <cuda_fp8.h>
+#include <hip/hip_runtime.h>
+#include <hip/hip_bf16.h>
+#include <hip/hip_fp16.h>
+#include <hip/hip_fp8.h>
 #if CUDA_VERSION >= 12080
-#include <cuda_fp4.h>
+#include <hip/hip_fp4.h>
 #endif
 
 #include <mutex>
@@ -41,7 +41,7 @@ constexpr int kThreadsPerWarp = 32;
 // The kernels that used these utilities are not compiled in pure DLPack mode.
 ////////////////////////////////////////////////////////////////////////////////
 
-/* Use CUDA const memory to store scalar 1 and 0 for cublas usage
+/* Use CUDA const memory to store scalar 1 and 0 for hipblas usage
  */
 __device__ __constant__ float one_device;
 __device__ __constant__ float zero_device;
@@ -49,10 +49,10 @@ __device__ __constant__ float zero_device;
 // Helper macro for CUDA error checking (replaces C10_CUDA_CHECK)
 #define CUDA_CHECK(call)                                                       \
   do {                                                                         \
-    cudaError_t err = call;                                                    \
-    if (err != cudaSuccess) {                                                  \
+    hipError_t err = call;                                                    \
+    if (err != hipSuccess) {                                                  \
       throw std::runtime_error(std::string("CUDA error: ") +                   \
-                               cudaGetErrorString(err));                       \
+                               hipGetErrorString(err));                       \
     }                                                                          \
   } while (0)
 
@@ -60,11 +60,11 @@ inline float *GetScalarOne() {
   static std::once_flag init_flag;
   std::call_once(init_flag, []() {
     float one = 1.0f;
-    CUDA_CHECK(cudaMemcpyToSymbol(one_device, &one, sizeof(float)));
+    CUDA_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(one_device), &one, sizeof(float)));
   });
   // return address by cudaGetSymbolAddress
   float *dev_ptr;
-  CUDA_CHECK(cudaGetSymbolAddress((void **)&dev_ptr, one_device));
+  CUDA_CHECK(hipGetSymbolAddress((void **)&dev_ptr, HIP_SYMBOL(one_device)));
   return dev_ptr;
 }
 
@@ -72,11 +72,11 @@ inline float *GetScalarZero() {
   static std::once_flag init_flag;
   std::call_once(init_flag, []() {
     float zero = 0.0f;
-    CUDA_CHECK(cudaMemcpyToSymbol(zero_device, &zero, sizeof(float)));
+    CUDA_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(zero_device), &zero, sizeof(float)));
   });
   // return address by cudaGetSymbolAddress
   float *dev_ptr;
-  CUDA_CHECK(cudaGetSymbolAddress((void **)&dev_ptr, zero_device));
+  CUDA_CHECK(hipGetSymbolAddress((void **)&dev_ptr, HIP_SYMBOL(zero_device)));
   return dev_ptr;
 }
 

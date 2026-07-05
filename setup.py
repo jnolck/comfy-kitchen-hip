@@ -15,43 +15,74 @@ import setuptools
 from setuptools import Extension
 from setuptools.command.build_ext import build_ext
 
-# Parse command-line early to check for --no-cuda flag
+# Parse command-line early to check for backend-selection flags
 # This needs to happen before get_extensions() is called
 # Usage: python setup.py install --no-cuda
 #    or: pip install . --no-cuda
+BUILD_HIP = os.getenv("COMFY_KITCHEN_BUILD_HIP") == "1"
+if "--hip" in sys.argv:
+    BUILD_HIP = True
+    sys.argv.remove("--hip")  # Remove so setuptools doesn't complain
+    print("\n" + "=" * 80)
+    print("HIP/ROCm backend explicitly enabled (--hip flag)")
+    print("=" * 80 + "\n")
+
+BUILD_NO_HIP = os.getenv("COMFY_KITCHEN_BUILD_NO_HIP") == "1"
+if "--no-hip" in sys.argv:
+    BUILD_NO_HIP = True
+    sys.argv.remove("--no-hip")  # Remove so setuptools doesn't complain
+    print("\n" + "=" * 80)
+    print("HIP/ROCm backend disabled (--no-hip flag)")
+    print("=" * 80 + "\n")
+
 BUILD_NO_CUDA = False
 if "--no-cuda" in sys.argv:
     BUILD_NO_CUDA = True
     sys.argv.remove("--no-cuda")  # Remove so setuptools doesn't complain
     print("\n" + "=" * 80)
-    print("Building CPU-only variant (--no-cuda flag)")
-    print("CUDA backend excluded - only eager, triton backends")
+    if BUILD_HIP:
+        print("CUDA backend excluded (--no-cuda flag)")
+        print("HIP backend remains enabled")
+    else:
+        print("Building CPU-only variant (--no-cuda flag)")
+        print("CUDA backend excluded - only eager, triton backends")
     print("=" * 80 + "\n")
 
 
 class CMakeExtension(Extension):
-    def __init__(self, name: str, source_dir: str = ""):
+    def __init__(self, name: str, source_dir: str = "", backend: str = "cuda"):
         super().__init__(name, sources=[])
         self.source_dir = os.path.abspath(source_dir) if source_dir else ""
+        self.backend = backend
 
 
 class CMakeBuildExt(build_ext):
     # Add custom command-line options
     user_options: ClassVar = [
         *build_ext.user_options,
-        ('cuda-archs=', None, 'CUDA architectures to build for (semicolon-separated, e.g., "80;89;90a")'),
-        ('debug-build', None, 'Build in debug mode with debug symbols'),
-        ('lineinfo', None, 'Enable NVCC line information for profiling (adds -lineinfo flag)'),
+        (
+            "cuda-archs=",
+            None,
+            'CUDA architectures to build for (semicolon-separated, e.g., "80;89;90a")',
+        ),
+        (
+            "hip-archs=",
+            None,
+            'HIP architectures to build for (semicolon-separated, e.g., "gfx1100;gfx1200")',
+        ),
+        ("debug-build", None, "Build in debug mode with debug symbols"),
+        ("lineinfo", None, "Enable NVCC line information for profiling (adds -lineinfo flag)"),
     ]
 
     # Default values for options
-    DEFAULT_CUDA_ARCHS_WINDOWS = "75-real;75-virtual;80;89;120f"  # No need for Datacenter GPUs
-    DEFAULT_CUDA_ARCHS_LINUX = "75-real;75-virtual;80;89;90a;100f;120f"  # + H100, B100
+    DEFAULT_CUDA_ARCHS_WINDOWS = "75-virtual;80;89;120f"  # No need for Datacenter GPUs
+    DEFAULT_CUDA_ARCHS_LINUX = "75-virtual;80;89;90a;100f;120f"  # + H100, B100
 
     def initialize_options(self):
         super().initialize_options()
         # Set defaults - can be overridden by command-line arguments
         self.cuda_archs = None  # Will use platform-specific default in finalize_options
+        self.hip_archs = None  # Will use COMFY_HIP_ARCHS or CMake auto-detection if unset
         self.debug_build = False  # Default: Release build
         self.lineinfo = False  # Default: disabled
 
@@ -61,10 +92,10 @@ class CMakeBuildExt(build_ext):
         # Apply platform-specific default for CUDA architectures if not specified
         if self.cuda_archs is None:
             self.cuda_archs = (
-                self.DEFAULT_CUDA_ARCHS_WINDOWS if os.name == "nt"
+                self.DEFAULT_CUDA_ARCHS_WINDOWS
+                if os.name == "nt"
                 else self.DEFAULT_CUDA_ARCHS_LINUX
             )
-
 
     def run(self):
         try:
@@ -89,7 +120,7 @@ class CMakeBuildExt(build_ext):
         ext_dir = ext_fullpath.parent
         ext_dir.mkdir(parents=True, exist_ok=True)
 
-        build_temp = pathlib.Path(self.build_temp).resolve()
+        build_temp = pathlib.Path(self.build_temp).resolve() / ext.backend
         build_temp.mkdir(parents=True, exist_ok=True)
 
         # Clean CMake cache if it exists (to avoid stale configuration)
@@ -101,19 +132,35 @@ class CMakeBuildExt(build_ext):
         # All options have been set in finalize_options with proper defaults
         config = "Debug" if self.debug_build else "Release"
         cuda_archs = self.cuda_archs
+        hip_archs = self.hip_archs or os.getenv("COMFY_HIP_ARCHS")
         enable_lineinfo = self.lineinfo
 
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={ext_dir}",
             f"-DCMAKE_BUILD_TYPE={config}",
             f"-DPython_EXECUTABLE={sys.executable}",
-            f"-DCOMFY_CUDA_ARCHS={cuda_archs}",
             f"-DCOMFY_ENABLE_LINEINFO={'ON' if enable_lineinfo else 'OFF'}",
         ]
 
-        cuda_home, nvcc_bin = get_cuda_path()
-        cmake_args.append(f"-DCUDAToolkit_ROOT={cuda_home}")
-        cmake_args.append(f"-DCMAKE_CUDA_COMPILER={nvcc_bin}")
+        if ext.backend == "cuda":
+            cmake_args.append(f"-DCOMFY_CUDA_ARCHS={cuda_archs}")
+            cuda_home, nvcc_bin = get_cuda_path()
+            cmake_args.append(f"-DCUDAToolkit_ROOT={cuda_home}")
+            cmake_args.append(f"-DCMAKE_CUDA_COMPILER={nvcc_bin}")
+        elif ext.backend == "hip":
+            rocm_home, hip_compiler = get_rocm_path()
+            if hip_archs:
+                cmake_args.append(f"-DCOMFY_HIP_ARCHS={hip_archs}")
+            if rocm_home:
+                cmake_args.append(f"-DCMAKE_PREFIX_PATH={rocm_home}")
+                cmake_args.append(f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={rocm_home}")
+            if hip_compiler:
+                cmake_args.append(f"-DCMAKE_HIP_COMPILER={hip_compiler}")
+                cmake_args.append(f"-DCMAKE_CXX_COMPILER={hip_compiler}")
+                cmake_args.append(f"-DCMAKE_C_COMPILER={hip_compiler}")
+                cmake_args.append("-DCMAKE_HIP_ARCHITECTURES=gfx1100")
+        else:
+            raise RuntimeError(f"Unknown CMake extension backend: {ext.backend}")
 
         build_args = ["--config", config]
 
@@ -127,13 +174,18 @@ class CMakeBuildExt(build_ext):
             build_args.extend(["--", f"-j{max_jobs}"])
 
         # Run CMake configure
-        source_dir = ext.source_dir if ext.source_dir else os.path.dirname(os.path.abspath(__file__))
+        source_dir = (
+            ext.source_dir if ext.source_dir else os.path.dirname(os.path.abspath(__file__))
+        )
 
-        print(f"Configuring CMake for {ext.name}...")
+        print(f"Configuring CMake for {ext.name} ({ext.backend})...")
         print(f"  Source directory: {source_dir}")
         print(f"  Build directory: {build_temp}")
         print(f"  Config: {config}")
-        print(f"  CUDA architectures: {cuda_archs}")
+        if ext.backend == "cuda":
+            print(f"  CUDA architectures: {cuda_archs}")
+        elif ext.backend == "hip":
+            print(f"  HIP architectures: {hip_archs or 'auto'}")
         print(f"  Line info: {'enabled' if enable_lineinfo else 'disabled'}")
 
         configure_cmd = ["cmake", source_dir, *cmake_args]
@@ -162,6 +214,7 @@ class CMakeBuildExt(build_ext):
 
         print(f"Successfully built {ext.name}")
 
+
 def get_cuda_path():
     nvcc_bin = None
     cuda_home = os.getenv("CUDA_HOME")
@@ -184,8 +237,12 @@ def get_cuda_path():
 
     return cuda_home, nvcc_bin
 
+
 def get_cuda_version() -> tuple[int, ...] | None:
-    _cuda_home, nvcc_bin = get_cuda_path()
+    cuda_path = get_cuda_path()
+    if cuda_path is None:
+        return None
+    _cuda_home, nvcc_bin = cuda_path
     try:
         output = subprocess.run(
             [nvcc_bin, "-V"],
@@ -202,6 +259,69 @@ def get_cuda_version() -> tuple[int, ...] | None:
 
     version = tuple(map(int, match.group(1).split(".")))
     return version
+
+
+def get_rocm_path() -> tuple[str | None, pathlib.Path | None]:
+    rocm_home = os.getenv("ROCM_HOME") or os.getenv("ROCM_PATH")
+    if rocm_home is None and pathlib.Path("/opt/rocm").exists():
+        rocm_home = "/opt/rocm"
+
+    compiler: pathlib.Path | None = None
+    if rocm_home:
+        rocm_path = pathlib.Path(rocm_home)
+        for candidate in (rocm_path / "bin" / "amdclang++", rocm_path / "bin" / "hipcc"):
+            if candidate.is_file():
+                compiler = candidate
+                break
+
+    if compiler is None:
+        for name in ("hipcc", "amdclang++"):
+            compiler_path = shutil.which(name)
+            if compiler_path:
+                compiler = pathlib.Path(compiler_path)
+                if rocm_home is None:
+                    rocm_home = str(compiler.parent.parent)
+                break
+
+    return rocm_home, compiler
+
+
+def setup_hip_extension() -> CMakeExtension:
+    print("=" * 80)
+    print("Checking for HIP/ROCm availability...")
+    print("=" * 80)
+
+    try:
+        import nanobind  # noqa: F401
+    except ImportError as e:
+        raise ImportError("ERROR: nanobind not found. Install with: pip install nanobind") from e
+
+    rocm_home, hip_compiler = get_rocm_path()
+    if hip_compiler is None:
+        raise RuntimeError(
+            "ERROR: Could not detect ROCm HIP compiler (amdclang++ or hipcc not found). "
+            "Install ROCm development packages and try again."
+        )
+
+    print(f"Found ROCm root: {rocm_home or 'auto'}")
+    print(f"Found HIP compiler: {hip_compiler}")
+
+    root_dir = pathlib.Path(__file__).resolve().parent
+    hip_backend_dir = root_dir / "comfy_kitchen" / "backends" / "hip"
+
+    if not hip_backend_dir.exists():
+        raise RuntimeError(f"WARNING: HIP backend directory not found: {hip_backend_dir}")
+
+    print("Building HIP extension with CMake + nanobind: comfy_kitchen.backends.hip._C")
+
+    ext_module = CMakeExtension(
+        name="comfy_kitchen.backends.hip._C",
+        source_dir=str(hip_backend_dir),
+        backend="hip",
+    )
+
+    print("HIP extension configured successfully (will be built with CMake)")
+    return ext_module
 
 
 def assert_cuda_version(version: tuple[int, ...]) -> None:
@@ -229,7 +349,9 @@ def setup_cuda_extension() -> CMakeExtension | None:
 
     cuda_version = get_cuda_version()
     if cuda_version is None:
-        raise RuntimeError("ERROR: Could not detect CUDA toolkit (nvcc not found). Install CUDA toolkit and try again.")
+        raise RuntimeError(
+            "ERROR: Could not detect CUDA toolkit (nvcc not found). Install CUDA toolkit and try again."
+        )
 
     print(f"Found CUDA version: {'.'.join(map(str, cuda_version))}")
 
@@ -250,6 +372,7 @@ def setup_cuda_extension() -> CMakeExtension | None:
     ext_module = CMakeExtension(
         name="comfy_kitchen.backends.cuda._C",
         source_dir=str(cuda_backend_dir),
+        backend="cuda",
     )
 
     print("CUDA extension configured successfully (will be built with CMake)")
@@ -261,24 +384,44 @@ def get_extensions() -> list[setuptools.Extension]:
 
     if BUILD_NO_CUDA:
         print("\n" + "=" * 80)
-        print("Building CPU-only variant (COMFY_KITCHEN_BUILD_NO_CUDA=1)")
-        print("CUDA backend excluded - only eager, triton backends")
+        print("CUDA backend excluded")
+        if BUILD_HIP:
+            print("Building HIP backend plus Python/eager/triton backends")
+        else:
+            print("Building Python/eager/triton package without CUDA")
         print("=" * 80 + "\n")
-        return extensions
+    else:
+        if get_cuda_version() is None:
+            print("\n" + "=" * 80)
+            print("CUDA toolkit not detected; skipping CUDA backend")
+            print("=" * 80 + "\n")
+        else:
+            cuda_ext = setup_cuda_extension()
+            if cuda_ext is not None:
+                extensions.append(cuda_ext)
 
-    cuda_ext = setup_cuda_extension()
-    if cuda_ext is not None:
-        extensions.append(cuda_ext)
+    _rocm_home, hip_compiler = get_rocm_path()
+    if BUILD_NO_HIP:
+        print("\n" + "=" * 80)
+        print("HIP/ROCm backend excluded")
+        print("=" * 80 + "\n")
+    elif BUILD_HIP or hip_compiler is not None:
+        hip_ext = setup_hip_extension()
+        extensions.append(hip_ext)
     else:
         print("\n" + "=" * 80)
-        print("Installing comfy_kitchen without CUDA backend")
-        print("Available backends: eager, triton (if installed)")
+        print("HIP/ROCm compiler not detected; skipping HIP backend")
+        print("=" * 80 + "\n")
+
+    if not extensions:
+        print("\n" + "=" * 80)
+        print("No native backend toolchains detected; building Python/eager/triton package only")
         print("=" * 80 + "\n")
 
     return extensions
 
 
-def get_cmdclass(has_extensions):
+def get_cmdclass(has_extensions, has_hip_extension=False):
     cmdclass = {}
 
     if has_extensions:
@@ -292,7 +435,9 @@ def get_cmdclass(has_extensions):
                 super().finalize_options()
                 # Set stable ABI tag only for Python 3.12+ (nanobind requirement)
                 # For 3.10/3.11, leave as version-specific (cpXXX-cpXXX)
-                if not BUILD_NO_CUDA and sys.version_info >= (3, 12):
+                # HIP currently builds a version-specific extension, so combined
+                # CUDA+HIP wheels must also be tagged version-specific.
+                if has_extensions and not has_hip_extension and sys.version_info >= (3, 12):
                     self.py_limited_api = "cp312"
 
         cmdclass["bdist_wheel"] = CUDABdistWheel
@@ -303,7 +448,7 @@ def get_cmdclass(has_extensions):
 
 
 def get_packages():
-    if BUILD_NO_CUDA:
+    if BUILD_NO_CUDA and not BUILD_HIP:
         cuda_dir = pathlib.Path("comfy_kitchen/backends/cuda")
         cuda_backup = pathlib.Path("cuda_backup_temp_build")
 
@@ -322,13 +467,19 @@ def get_packages():
 
 
 extensions = get_extensions()
+has_hip_extension = any(
+    isinstance(ext, CMakeExtension) and ext.backend == "hip" for ext in extensions
+)
 
 setup_kwargs = {
     "ext_modules": extensions,
-    "cmdclass": get_cmdclass(has_extensions=bool(extensions)),
+    "cmdclass": get_cmdclass(
+        has_extensions=bool(extensions),
+        has_hip_extension=has_hip_extension,
+    ),
 }
 
-if BUILD_NO_CUDA:
+if BUILD_NO_CUDA and not BUILD_HIP:
     with open("pyproject.toml", "rb") as f:
         pyproject = tomllib.load(f)
 
@@ -336,22 +487,26 @@ if BUILD_NO_CUDA:
     version = project_meta.get("version", "0.1.0")
     description = project_meta.get("description", "")
 
-    setup_kwargs.update({
-        "packages": get_packages(),
-        "name": "comfy-kitchen",
-        "version": version,
-        "description": f"{description} (CPU-only)",
-        "include_package_data": False,
-        "install_requires": [
-            "torch>=2.5.0",
-        ],
-    })
+    setup_kwargs.update(
+        {
+            "packages": get_packages(),
+            "name": "comfy-kitchen",
+            "version": version,
+            "description": f"{description} (CPU-only)",
+            "include_package_data": False,
+            "install_requires": [
+                "torch>=2.5.0",
+            ],
+        }
+    )
 
     readme_path = pathlib.Path("README.md")
     if readme_path.exists():
-        setup_kwargs.update({
-            "long_description": readme_path.read_text(),
-            "long_description_content_type": "text/markdown",
-        })
+        setup_kwargs.update(
+            {
+                "long_description": readme_path.read_text(),
+                "long_description_content_type": "text/markdown",
+            }
+        )
 
 setuptools.setup(**setup_kwargs)
