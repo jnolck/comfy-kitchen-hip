@@ -48,6 +48,7 @@ set(HIP_SOURCES
     ops/ck_gemm_int8.cu
     ops/apply_rope.cu
     ops/adaln.cu
+    ops/per_tensor_quantize.cu
 )
 
 set_source_files_properties(${CPP_SOURCES} PROPERTIES LANGUAGE CXX)
@@ -57,21 +58,6 @@ set_source_files_properties(${HIP_SOURCES} PROPERTIES LANGUAGE HIP)
 nanobind_add_module(_C NB_STATIC STABLE_ABI LTO ${CPP_SOURCES} ${HIP_SOURCES})
 set_target_properties(_C PROPERTIES SUFFIX ".abi3.so")
 target_compile_definitions(_C PRIVATE Py_LIMITED_API=0x030C0000 NB_STATIC)
-
-# # CXX-only flags
-# target_compile_options(_C PRIVATE
-#     $<$<COMPILE_LANGUAGE:CXX>:-fvisibility=hidden>
-#     $<$<COMPILE_LANGUAGE:CXX>:-fdiagnostics-color=always>
-#     $<$<COMPILE_LANGUAGE:CXX>:-O3>
-# )
-#
-# # HIP-only flags
-# target_compile_options(_C PRIVATE
-#     $<$<COMPILE_LANGUAGE:HIP>:-fvisibility=hidden>
-#     $<$<COMPILE_LANGUAGE:HIP>:-fdiagnostics-color=always>
-#     $<$<COMPILE_LANGUAGE:HIP>:--offload-arch=gfx1100>
-#     $<$<COMPILE_LANGUAGE:HIP>:-O3>
-# )
 
 # Include directories
 target_include_directories(_C PRIVATE
@@ -92,16 +78,6 @@ if(EXISTS "${COMFY_CK_DIR}/ck_tile/core.hpp")
 else()
         message(STATUS "CK not found at ${COMFY_CK_DIR} - fused int8 GEMM uses hipBLASLt only")
 endif()
-
-# CK include directories (header-only)
-# if(EXISTS "${CK_DIR}/include")
-#         target_include_directories(_C PRIVATE
-#         ${CK_DIR}/include
-#         ${CK_DIR}/include/ck
-#         ${CK_DIR}/include/ck_tile
-#         ${CK_DIR}/library/include
-# )
-# endif()
 
 # Link libraries
 target_link_libraries(_C PRIVATE

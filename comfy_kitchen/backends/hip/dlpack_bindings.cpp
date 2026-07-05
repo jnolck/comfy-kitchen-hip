@@ -49,22 +49,21 @@ int map_dtype_to_code(const nb::dlpack::dtype &dtype) {
 
 // Forward declarations of rocm kernel wrappers
 extern "C" {
-// void launch_quantize_fp8_kernel(const void *input, void *output,
-//                                 const void *scale, int64_t numel,
-//                                 int input_dtype_code, int output_dtype_code,
-//                                 hipStream_t stream);
-//
-// void launch_dequantize_fp8_kernel(const void *input, void *output,
-//                                   const void *scale, int64_t numel,
-//                                   int input_dtype_code, int
-//                                   output_dtype_code, hipStream_t stream);
-//
-// void launch_stochastic_round_fp8_kernel(void *rng_and_output, const void
-// *input,
-//                                         int64_t numel, int rng_dtype_code,
-//                                         int input_dtype_code,
-//                                         int output_dtype_code,
-//                                         hipStream_t stream);
+void launch_quantize_fp8_kernel(const void *input, void *output,
+                                const void *scale, int64_t numel,
+                                int input_dtype_code, int output_dtype_code,
+                                hipStream_t stream);
+
+void launch_dequantize_fp8_kernel(const void *input, void *output,
+                                  const void *scale, int64_t numel,
+                                  int input_dtype_code, int output_dtype_code,
+                                  hipStream_t stream);
+
+void launch_stochastic_round_fp8_kernel(void *rng_and_output, const void *input,
+                                        int64_t numel, int rng_dtype_code,
+                                        int input_dtype_code,
+                                        int output_dtype_code,
+                                        hipStream_t stream);
 //
 // void launch_cublas_gemm_blockwise_fp4_kernel(
 //     const void *B_ptr, const void *B_decode_scale_ptr, const void *A_ptr,
@@ -134,85 +133,78 @@ void launch_adaln_kernel(const void *x, const void *scale, const void *shift,
                          hipStream_t stream);
 }
 //
-// // Nanobind wrapper for quantize_per_tensor_fp8
-// void quantize_per_tensor_fp8(nb::ndarray<> input,
-//                              nb::ndarray<> scale,
-//                              nb::ndarray<> output,
-//                              int input_dtype_code, int output_dtype_code,
-//                              int64_t numel, uintptr_t stream_ptr) {
-//
-//   // Validate input dtype code (0=float32, 1=float16, 2=bfloat16)
-//   if (input_dtype_code < 0 || input_dtype_code > 2) {
-//     throw std::runtime_error(
-//         "Unsupported input dtype for quantize_per_tensor_fp8");
-//   }
-//
-//   // Validate output dtype code (5=e4m3fn, 6=e5m2)
-//   if (output_dtype_code < 5 || output_dtype_code > 6) {
-//     throw std::runtime_error(
-//         "Unsupported output dtype for quantize_per_tensor_fp8");
-//   }
-//
-//   hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
-//   launch_quantize_fp8_kernel(input.data(), output.data(), scale.data(),
-//   numel,
-//                              input_dtype_code, output_dtype_code, stream);
-// }
+// Nanobind wrapper for quantize_per_tensor_fp8
+void quantize_per_tensor_fp8(nb::ndarray<> input, nb::ndarray<> scale,
+                             nb::ndarray<> output, int input_dtype_code,
+                             int output_dtype_code, int64_t numel,
+                             uintptr_t stream_ptr) {
 
-// // Nanobind wrapper for dequantize_per_tensor_fp8
-// void dequantize_per_tensor_fp8(nb::ndarray<> input,
-//                                nb::ndarray<> scale,
-//                                nb::ndarray<> output,
-//                                int input_dtype_code, int output_dtype_code,
-//                                int64_t numel, uintptr_t stream_ptr) {
+  // Validate input dtype code (0=float32, 1=float16, 2=bfloat16)
+  if (input_dtype_code < 0 || input_dtype_code > 2) {
+    throw std::runtime_error(
+        "Unsupported input dtype for quantize_per_tensor_fp8");
+  }
+
+  // Validate output dtype code (5=e4m3fn, 6=e5m2)
+  if (output_dtype_code < 5 || output_dtype_code > 6) {
+    throw std::runtime_error(
+        "Unsupported output dtype for quantize_per_tensor_fp8");
+  }
+
+  hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+  launch_quantize_fp8_kernel(input.data(), output.data(), scale.data(), numel,
+                             input_dtype_code, output_dtype_code, stream);
+}
+
+// Nanobind wrapper for dequantize_per_tensor_fp8
+void dequantize_per_tensor_fp8(nb::ndarray<> input, nb::ndarray<> scale,
+                               nb::ndarray<> output, int input_dtype_code,
+                               int output_dtype_code, int64_t numel,
+                               uintptr_t stream_ptr) {
+
+  // Validate input dtype code (5=float8_e4m3fn, 6=float8_e5m2)
+  if (input_dtype_code != 5 && input_dtype_code != 6) {
+    throw std::runtime_error("Unsupported input dtype code for "
+                             "dequantize_per_tensor_fp8 (must be 5 or 6)");
+  }
+
+  // Validate output dtype code (0=float32, 1=float16, 2=bfloat16)
+  if (output_dtype_code < 0 || output_dtype_code > 2) {
+    throw std::runtime_error(
+        "Unsupported output dtype for dequantize_per_tensor_fp8 (must be "
+        "float32, float16, or bfloat16)");
+  }
+
+  hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+  launch_dequantize_fp8_kernel(input.data(), output.data(), scale.data(), numel,
+                               input_dtype_code, output_dtype_code, stream);
+}
 //
-//   // Validate input dtype code (5=float8_e4m3fn, 6=float8_e5m2)
-//   if (input_dtype_code != 5 && input_dtype_code != 6) {
-//     throw std::runtime_error("Unsupported input dtype code for "
-//                              "dequantize_per_tensor_fp8 (must be 5 or 6)");
-//   }
-//
-//   // Validate output dtype code (0=float32, 1=float16, 2=bfloat16)
-//   if (output_dtype_code < 0 || output_dtype_code > 2) {
-//     throw std::runtime_error(
-//         "Unsupported output dtype for dequantize_per_tensor_fp8 (must be "
-//         "float32, float16, or bfloat16)");
-//   }
-//
-//   hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
-//   launch_dequantize_fp8_kernel(input.data(), output.data(), scale.data(),
-//   numel,
-//                                input_dtype_code, output_dtype_code, stream);
-// }
-//
-// void stochastic_round_fp8(nb::ndarray<> rng_and_output,
-//                           nb::ndarray<> input,
-//                           int output_dtype_code, int64_t numel,
-//                           uintptr_t stream_ptr) {
-//
-//   int rng_dtype_code = map_dtype_to_code(rng_and_output.dtype());
-//   if (rng_dtype_code != 3) {
-//     throw std::runtime_error("stochastic_round_fp8 requires uint8 RNG
-//     storage");
-//   }
-//
-//   int input_dtype_code = map_dtype_to_code(input.dtype());
-//   if (input_dtype_code < 0 || input_dtype_code > 2) {
-//     throw std::runtime_error(
-//         "Unsupported input dtype for stochastic_round_fp8");
-//   }
-//
-//   if (output_dtype_code < 5 || output_dtype_code > 6) {
-//     throw std::runtime_error(
-//         "Unsupported output dtype for stochastic_round_fp8");
-//   }
-//
-//   hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
-//   launch_stochastic_round_fp8_kernel(rng_and_output.data(), input.data(),
-//   numel,
-//                                      rng_dtype_code, input_dtype_code,
-//                                      output_dtype_code, stream);
-//}
+void stochastic_round_fp8(nb::ndarray<> rng_and_output, nb::ndarray<> input,
+                          int output_dtype_code, int64_t numel,
+                          uintptr_t stream_ptr) {
+
+  int rng_dtype_code = map_dtype_to_code(rng_and_output.dtype());
+  if (rng_dtype_code != 3) {
+    throw std::runtime_error("stochastic_round_fp8 requires uint8 RNG storage");
+  }
+
+  int input_dtype_code = map_dtype_to_code(input.dtype());
+  if (input_dtype_code < 0 || input_dtype_code > 2) {
+    throw std::runtime_error(
+        "Unsupported input dtype for stochastic_round_fp8");
+  }
+
+  if (output_dtype_code < 5 || output_dtype_code > 6) {
+    throw std::runtime_error(
+        "Unsupported output dtype for stochastic_round_fp8");
+  }
+
+  hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+  launch_stochastic_round_fp8_kernel(rng_and_output.data(), input.data(), numel,
+                                     rng_dtype_code, input_dtype_code,
+                                     output_dtype_code, stream);
+}
 
 // // Nanobind wrapper for cublas_gemm_blockwise_fp4
 // void cublas_gemm_blockwise_fp4(
@@ -759,23 +751,20 @@ NB_MODULE(_C, m) {
   m.doc() = "comfy_kitchen ROCM kernels - nanobind + DLPack interface (NO "
             "PyTorch C++ dependencies)";
 
-  // m.def("quantize_per_tensor_fp8", &quantize_per_tensor_fp8,
-  //       "Quantize to FP8 using nanobind ndarrays", nb::arg("input"),
-  //       nb::arg("scale"), nb::arg("output"), nb::arg("input_dtype_code"),
-  //       nb::arg("output_dtype_code"), nb::arg("numel"),
-  //       nb::arg("stream_ptr"));
-  //
-  // m.def("dequantize_per_tensor_fp8", &dequantize_per_tensor_fp8,
-  //       "Dequantize from FP8 using nanobind ndarrays", nb::arg("input"),
-  //       nb::arg("scale"), nb::arg("output"), nb::arg("input_dtype_code"),
-  //       nb::arg("output_dtype_code"), nb::arg("numel"),
-  //       nb::arg("stream_ptr"));
-  //
-  // m.def("stochastic_round_fp8", &stochastic_round_fp8,
-  //       "Stochastically round to FP8, overwriting RNG storage with FP8
-  //       output", nb::arg("rng_and_output"), nb::arg("input"),
-  //       nb::arg("output_dtype_code"), nb::arg("numel"),
-  //       nb::arg("stream_ptr"));
+  m.def("quantize_per_tensor_fp8", &quantize_per_tensor_fp8,
+        "Quantize to FP8 using nanobind ndarrays", nb::arg("input"),
+        nb::arg("scale"), nb::arg("output"), nb::arg("input_dtype_code"),
+        nb::arg("output_dtype_code"), nb::arg("numel"), nb::arg("stream_ptr"));
+
+  m.def("dequantize_per_tensor_fp8", &dequantize_per_tensor_fp8,
+        "Dequantize from FP8 using nanobind ndarrays", nb::arg("input"),
+        nb::arg("scale"), nb::arg("output"), nb::arg("input_dtype_code"),
+        nb::arg("output_dtype_code"), nb::arg("numel"), nb::arg("stream_ptr"));
+
+  m.def("stochastic_round_fp8", &stochastic_round_fp8,
+        "Stochastically round to FP8, overwriting RNG storage with FP8 output",
+        nb::arg("rng_and_output"), nb::arg("input"),
+        nb::arg("output_dtype_code"), nb::arg("numel"), nb::arg("stream_ptr"));
   //
   // m.def("cublas_gemm_blockwise_fp4", &cublas_gemm_blockwise_fp4,
   //       "cuBLAS FP4 GEMM with block-wise scaling", nb::arg("b"),
