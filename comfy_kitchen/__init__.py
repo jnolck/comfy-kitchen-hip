@@ -1,7 +1,6 @@
 import torch
 
 from .backends import cuda as _cuda_backend  # noqa: F401
-from .backends import rocm as _rocm_backend
 from .backends import hip as _hip_backend
 
 # Import backends to trigger auto-registration
@@ -20,7 +19,7 @@ from .float_utils import from_blocked, swap_nibbles, to_blocked
 # Import registry and exceptions
 from .registry import registry
 
-registry.set_priority(["hip", "rocm", "triton", "eager"])
+registry.set_priority(["hip", "triton", "eager"])
 
 __version__ = "0.1.0"
 
