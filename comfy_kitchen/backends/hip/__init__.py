@@ -33,6 +33,7 @@ __all__ = [
     "dequantize_int8_convrot_weight",
     "dequantize_int8_convrot_weight_dtype",
     "int8_linear",
+    "int8_gemv_dequant",
     "quantize_int8_tensorwise",
     "quantize_int8_rowwise",
     "quantize_int8_convrot_weight",
@@ -1936,15 +1937,15 @@ def _build_constraints() -> dict:
 def _register():
     """Register CUDA backend with the global registry."""
     if not _EXT_AVAILABLE:
-        registry.mark_unavailable("cuda", _EXT_ERROR)
+        registry.mark_unavailable("hip", _EXT_ERROR)
         return
 
     if not torch.cuda.is_available():
-        registry.mark_unavailable("cuda", "CUDA not available on this system")
+        registry.mark_unavailable("hip", "CUDA not available on this system")
         return
 
     registry.register(
-        name="cuda",
+        name="hip",
         module=__import__(__name__, fromlist=__all__),
         capabilities=_build_constraints(),
     )

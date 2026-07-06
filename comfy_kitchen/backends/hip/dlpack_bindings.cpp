@@ -270,10 +270,10 @@ void launch_apply_rope_kernel(
 
 // Nanobind wrapper for cublas_gemm_blockwise_fp4
 // void cublas_gemm_blockwise_fp4(
-//     nb::ndarray<uint8_t, nb::ndim<2>,  > b,
-//     nb::ndarray<uint8_t, nb::ndim<2>,  > block_scale_b,
-//     nb::ndarray<uint8_t, nb::ndim<2>,  > a,
-//     nb::ndarray<uint8_t, nb::ndim<2>,  > block_scale_a,
+//     nb::ndarray<uint8_t, nb::ndim<2>> b,
+//     nb::ndarray<uint8_t, nb::ndim<2>> block_scale_b,
+//     nb::ndarray<uint8_t, nb::ndim<2>> a,
+//     nb::ndarray<uint8_t, nb::ndim<2>> block_scale_a,
 //     nb::ndarray< > out,
 //     int out_dtype_code,
 //     nb::ndarray< > bias,
@@ -752,9 +752,9 @@ void launch_dequantize_int8_convrot_kernel(const void *input,
 }
 
 // Nanobind wrapper for cublas_gemm_int8
-void cublas_gemm_int8(nb::ndarray<int8_t, nb::ndim<2>, > a,
-                      nb::ndarray<int8_t, nb::ndim<2>, > b,
-                      nb::ndarray<int32_t, nb::ndim<2>, > c,
+void cublas_gemm_int8(nb::ndarray<int8_t, nb::ndim<2>> a,
+                      nb::ndarray<int8_t, nb::ndim<2>> b,
+                      nb::ndarray<int32_t, nb::ndim<2>> c,
                       nb::ndarray<> workspace, uintptr_t stream_ptr) {
 
   auto &runtime = comfy::HipblasLtRuntime::instance();
@@ -784,9 +784,9 @@ void cublas_gemm_int8(nb::ndarray<int8_t, nb::ndim<2>, > a,
       workspace.size() > 0 ? (int64_t)workspace.size() : 0, stream);
 }
 
-void quantize_int8_rowwise(nb::ndarray<nb::ndim<2>, > input,
-                           nb::ndarray<int8_t, nb::ndim<2>, > output,
-                           nb::ndarray<float, nb::ndim<2>, > scales,
+void quantize_int8_rowwise(nb::ndarray<nb::ndim<2>> input,
+                           nb::ndarray<int8_t, nb::ndim<2>> output,
+                           nb::ndarray<float, nb::ndim<2>> scales,
                            bool stochastic, uint64_t seed,
                            uintptr_t stream_ptr) {
 
@@ -813,12 +813,12 @@ void quantize_int8_rowwise(nb::ndarray<nb::ndim<2>, > input,
 
 // INT8 GEMM + fused dequant (D = acc * xs[m] * ws[n] + bias[n]) via CUTLASS.
 // Returns true on success; false means caller falls back to cuBLAS + dequant.
-bool cutlass_int8_dequant(nb::ndarray<int8_t, nb::ndim<2>, > a, // [M, K]
-                          nb::ndarray<int8_t, nb::ndim<2>, > b, // [N, K]
-                          nb::ndarray<float, > xs, // [M] per-row act scale
-                          nb::ndarray<float, > ws, // [N] per-col weight scale
-                          nb::ndarray<> bias,      // [N] float or empty
-                          nb::ndarray<nb::ndim<2>, > d, // [M, N] output
+bool cutlass_int8_dequant(nb::ndarray<int8_t, nb::ndim<2>> a, // [M, K]
+                          nb::ndarray<int8_t, nb::ndim<2>> b, // [N, K]
+                          nb::ndarray<float> xs, // [M] per-row act scale
+                          nb::ndarray<float> ws, // [N] per-col weight scale
+                          nb::ndarray<> bias,    // [N] float or empty
+                          nb::ndarray<nb::ndim<2>> d, // [M, N] output
                           int out_dtype_code, uintptr_t stream_ptr) {
   const int64_t M = a.shape(0);
   const int64_t K = a.shape(1);
@@ -834,9 +834,9 @@ bool cutlass_int8_dequant(nb::ndarray<int8_t, nb::ndim<2>, > a, // [M, K]
                                      out_dtype_code, stream);
 }
 
-void quantize_int8_rowwise_convrot(nb::ndarray<nb::ndim<2>, > input,
-                                   nb::ndarray<int8_t, nb::ndim<2>, > output,
-                                   nb::ndarray<float, nb::ndim<2>, > scales,
+void quantize_int8_rowwise_convrot(nb::ndarray<nb::ndim<2>> input,
+                                   nb::ndarray<int8_t, nb::ndim<2>> output,
+                                   nb::ndarray<float, nb::ndim<2>> scales,
                                    int64_t group_size, bool stochastic,
                                    uint64_t seed, uintptr_t stream_ptr) {
 
@@ -861,8 +861,8 @@ void quantize_int8_rowwise_convrot(nb::ndarray<nb::ndim<2>, > input,
       static_cast<int>(group_size), input_dtype_code, stochastic, seed, stream);
 }
 
-void rotate_int8_convrot_weight(nb::ndarray<nb::ndim<2>, > input,
-                                nb::ndarray<nb::ndim<2>, > output,
+void rotate_int8_convrot_weight(nb::ndarray<nb::ndim<2>> input,
+                                nb::ndarray<nb::ndim<2>> output,
                                 int64_t group_size, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
@@ -885,11 +885,11 @@ void rotate_int8_convrot_weight(nb::ndarray<nb::ndim<2>, > input,
 }
 
 void quantize_int8_convrot_staged(
-    nb::ndarray<nb::ndim<2>, > input, nb::ndarray<nb::ndim<2>, > rotated,
-    nb::ndarray<float, nb::ndim<2>, > partial_absmax,
-    nb::ndarray<int8_t, nb::ndim<2>, > output,
-    nb::ndarray<float, nb::ndim<2>, > scales, int64_t group_size,
-    bool stochastic, uint64_t seed, uintptr_t stream_ptr) {
+    nb::ndarray<nb::ndim<2>> input, nb::ndarray<nb::ndim<2>> rotated,
+    nb::ndarray<float, nb::ndim<2>> partial_absmax,
+    nb::ndarray<int8_t, nb::ndim<2>> output,
+    nb::ndarray<float, nb::ndim<2>> scales, int64_t group_size, bool stochastic,
+    uint64_t seed, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
   const int64_t K = input.shape(1);
@@ -921,9 +921,9 @@ void quantize_int8_convrot_staged(
       rotated_dtype_code, stochastic, seed, stream);
 }
 
-void quantize_int8_rowwise_convrot64(nb::ndarray<nb::ndim<2>, > input,
-                                     nb::ndarray<int8_t, nb::ndim<2>, > output,
-                                     nb::ndarray<float, nb::ndim<2>, > scales,
+void quantize_int8_rowwise_convrot64(nb::ndarray<nb::ndim<2>> input,
+                                     nb::ndarray<int8_t, nb::ndim<2>> output,
+                                     nb::ndarray<float, nb::ndim<2>> scales,
                                      int64_t group_size, bool stochastic,
                                      uint64_t seed, uintptr_t stream_ptr) {
 
@@ -948,11 +948,10 @@ void quantize_int8_rowwise_convrot64(nb::ndarray<nb::ndim<2>, > input,
       static_cast<int>(group_size), input_dtype_code, stochastic, seed, stream);
 }
 
-void dequantize_int8_linear(nb::ndarray<int32_t, nb::ndim<2>, > input,
-                            nb::ndarray<float, nb::ndim<2>, > x_scales,
-                            nb::ndarray<float, > weight_scales,
-                            nb::ndarray<> bias,
-                            nb::ndarray<nb::ndim<2>, > output,
+void dequantize_int8_linear(nb::ndarray<int32_t, nb::ndim<2>> input,
+                            nb::ndarray<float, nb::ndim<2>> x_scales,
+                            nb::ndarray<float> weight_scales,
+                            nb::ndarray<> bias, nb::ndarray<nb::ndim<2>> output,
                             int output_dtype_code, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
@@ -988,11 +987,11 @@ void dequantize_int8_linear(nb::ndarray<int32_t, nb::ndim<2>, > input,
       bias_dtype_code, stream);
 }
 
-void int8_gemv_dequant(nb::ndarray<int8_t, nb::ndim<2>, > input,
-                       nb::ndarray<int8_t, nb::ndim<2>, > weight,
-                       nb::ndarray<float, nb::ndim<2>, > x_scales,
-                       nb::ndarray<float, > weight_scales, nb::ndarray<> bias,
-                       nb::ndarray<nb::ndim<2>, > output, int output_dtype_code,
+void int8_gemv_dequant(nb::ndarray<int8_t, nb::ndim<2>> input,
+                       nb::ndarray<int8_t, nb::ndim<2>> weight,
+                       nb::ndarray<float, nb::ndim<2>> x_scales,
+                       nb::ndarray<float> weight_scales, nb::ndarray<> bias,
+                       nb::ndarray<nb::ndim<2>> output, int output_dtype_code,
                        uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
@@ -1034,12 +1033,12 @@ void int8_gemv_dequant(nb::ndarray<int8_t, nb::ndim<2>, > input,
       bias_dtype_code, stream);
 }
 
-void int8_linear_m1(nb::ndarray<nb::ndim<2>, > input,
-                    nb::ndarray<int8_t, nb::ndim<2>, > q_scratch,
-                    nb::ndarray<float, nb::ndim<2>, > x_scales,
-                    nb::ndarray<int8_t, nb::ndim<2>, > weight,
-                    nb::ndarray<float, > weight_scales, nb::ndarray<> bias,
-                    nb::ndarray<nb::ndim<2>, > output, int output_dtype_code,
+void int8_linear_m1(nb::ndarray<nb::ndim<2>> input,
+                    nb::ndarray<int8_t, nb::ndim<2>> q_scratch,
+                    nb::ndarray<float, nb::ndim<2>> x_scales,
+                    nb::ndarray<int8_t, nb::ndim<2>> weight,
+                    nb::ndarray<float> weight_scales, nb::ndarray<> bias,
+                    nb::ndarray<nb::ndim<2>> output, int output_dtype_code,
                     bool convrot, int group_size, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
@@ -1102,10 +1101,9 @@ void int8_linear_m1(nb::ndarray<nb::ndim<2>, > input,
       bias_dtype_code, stream);
 }
 
-void dequantize_int8_simple(nb::ndarray<int8_t, > input,
-                            nb::ndarray<float, > scale, nb::ndarray<> output,
-                            int64_t inner_dim, int scale_mode,
-                            uintptr_t stream_ptr) {
+void dequantize_int8_simple(nb::ndarray<int8_t> input, nb::ndarray<float> scale,
+                            nb::ndarray<> output, int64_t inner_dim,
+                            int scale_mode, uintptr_t stream_ptr) {
 
   if (output.size() != input.size()) {
     throw std::runtime_error(
@@ -1137,9 +1135,9 @@ void dequantize_int8_simple(nb::ndarray<int8_t, > input,
       output_dtype_code, stream);
 }
 
-void dequantize_int8_convrot_weight(nb::ndarray<int8_t, nb::ndim<2>, > input,
-                                    nb::ndarray<float, > scale,
-                                    nb::ndarray<nb::ndim<2>, > output,
+void dequantize_int8_convrot_weight(nb::ndarray<int8_t, nb::ndim<2>> input,
+                                    nb::ndarray<float> scale,
+                                    nb::ndarray<nb::ndim<2>> output,
                                     int64_t group_size, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
