@@ -189,9 +189,9 @@ void launch_apply_rope_kernel(
 }
 
 // Nanobind wrapper for quantize_per_tensor_fp8
-// void quantize_per_tensor_fp8(nb::ndarray<nb::device::cuda> input,
-//                              nb::ndarray<nb::device::cuda> scale,
-//                              nb::ndarray<nb::device::cuda> output,
+// void quantize_per_tensor_fp8(nb::ndarray< > input,
+//                              nb::ndarray< > scale,
+//                              nb::ndarray< > output,
 //                              int input_dtype_code, int output_dtype_code,
 //                              int64_t numel, uintptr_t stream_ptr) {
 //
@@ -214,9 +214,9 @@ void launch_apply_rope_kernel(
 // }
 
 // Nanobind wrapper for dequantize_per_tensor_fp8
-// void dequantize_per_tensor_fp8(nb::ndarray<nb::device::cuda> input,
-//                                nb::ndarray<nb::device::cuda> scale,
-//                                nb::ndarray<nb::device::cuda> output,
+// void dequantize_per_tensor_fp8(nb::ndarray< > input,
+//                                nb::ndarray< > scale,
+//                                nb::ndarray< > output,
 //                                int input_dtype_code, int output_dtype_code,
 //                                int64_t numel, uintptr_t stream_ptr) {
 //
@@ -239,8 +239,8 @@ void launch_apply_rope_kernel(
 //                                input_dtype_code, output_dtype_code, stream);
 // }
 
-// void stochastic_round_fp8(nb::ndarray<nb::device::cuda> rng_and_output,
-//                           nb::ndarray<nb::device::cuda> input,
+// void stochastic_round_fp8(nb::ndarray< > rng_and_output,
+//                           nb::ndarray< > input,
 //                           int output_dtype_code, int64_t numel,
 //                           uintptr_t stream_ptr) {
 //
@@ -270,16 +270,16 @@ void launch_apply_rope_kernel(
 
 // Nanobind wrapper for cublas_gemm_blockwise_fp4
 // void cublas_gemm_blockwise_fp4(
-//     nb::ndarray<uint8_t, nb::ndim<2>, nb::device::cuda> b,
-//     nb::ndarray<uint8_t, nb::ndim<2>, nb::device::cuda> block_scale_b,
-//     nb::ndarray<uint8_t, nb::ndim<2>, nb::device::cuda> a,
-//     nb::ndarray<uint8_t, nb::ndim<2>, nb::device::cuda> block_scale_a,
-//     nb::ndarray<nb::device::cuda> out,
+//     nb::ndarray<uint8_t, nb::ndim<2>,  > b,
+//     nb::ndarray<uint8_t, nb::ndim<2>,  > block_scale_b,
+//     nb::ndarray<uint8_t, nb::ndim<2>,  > a,
+//     nb::ndarray<uint8_t, nb::ndim<2>,  > block_scale_a,
+//     nb::ndarray< > out,
 //     int out_dtype_code,
-//     nb::ndarray<nb::device::cuda> bias,
-//     nb::ndarray<nb::device::cuda> workspace,
+//     nb::ndarray< > bias,
+//     nb::ndarray< > workspace,
 //     bool accumulate,
-//     nb::ndarray<float, nb::device::cuda> alpha,
+//     nb::ndarray<float,  > alpha,
 //     uintptr_t stream_ptr) {
 //
 //     auto& runtime = comfy::HipblasLtRuntime::instance();
@@ -332,10 +332,10 @@ void launch_apply_rope_kernel(
 
 // Nanobind wrapper for quantize_nvfp4
 // void quantize_nvfp4(
-//     nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
-//     nb::ndarray<nb::device::cuda> global_scale,
-//     nb::ndarray<nb::device::cuda> output,
-//     nb::ndarray<nb::device::cuda> block_scales,
+//     nb::ndarray<nb::ndim<2>,  > input,
+//     nb::ndarray< > global_scale,
+//     nb::ndarray< > output,
+//     nb::ndarray< > block_scales,
 //     float epsilon,
 //     bool pad_16x,
 //     bool hi_first,
@@ -380,10 +380,10 @@ void launch_apply_rope_kernel(
 
 // Nanobind wrapper for dequantize_nvfp4
 // void dequantize_nvfp4(
-//     nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
-//     nb::ndarray<nb::device::cuda> global_scale,
-//     nb::ndarray<nb::device::cuda> block_scales,
-//     nb::ndarray<nb::ndim<2>, nb::device::cuda> output,
+//     nb::ndarray<nb::ndim<2>,  > input,
+//     nb::ndarray< > global_scale,
+//     nb::ndarray< > block_scales,
+//     nb::ndarray<nb::ndim<2>,  > output,
 //     int output_dtype_code,
 //     bool hi_first,
 //     uintptr_t stream_ptr) {
@@ -413,9 +413,9 @@ void launch_apply_rope_kernel(
 //
 // // Nanobind wrapper for quantize_mxfp8
 // void quantize_mxfp8(
-//     nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
-//     nb::ndarray<nb::device::cuda> output,
-//     nb::ndarray<nb::device::cuda> block_scales,
+//     nb::ndarray<nb::ndim<2>,  > input,
+//     nb::ndarray< > output,
+//     nb::ndarray< > block_scales,
 //     bool pad_32x,
 //     uintptr_t stream_ptr) {
 //
@@ -454,10 +454,8 @@ void launch_apply_rope_kernel(
 // }
 
 // Nanobind wrapper for apply_rope (handles both single tensor and q/k pair)
-void apply_rope(nb::ndarray<nb::device::cuda> xq,
-                nb::ndarray<nb::device::cuda> freqs,
-                nb::ndarray<nb::device::cuda> xq_out, nb::object xk_obj,
-                nb::object xk_out_obj, uintptr_t stream_ptr,
+void apply_rope(nb::ndarray<> xq, nb::ndarray<> freqs, nb::ndarray<> xq_out,
+                nb::object xk_obj, nb::object xk_out_obj, uintptr_t stream_ptr,
                 bool split_half = false) {
 
   // Get xq dimensions: (batch, dim1, dim2, head_dim) - layout agnostic
@@ -496,8 +494,8 @@ void apply_rope(nb::ndarray<nb::device::cuda> xq,
   void *xk_out_data = nullptr;
 
   if (has_xk) {
-    auto xk = nb::cast<nb::ndarray<nb::device::cuda>>(xk_obj);
-    auto xk_out = nb::cast<nb::ndarray<nb::device::cuda>>(xk_out_obj);
+    auto xk = nb::cast<nb::ndarray<>>(xk_obj);
+    auto xk_out = nb::cast<nb::ndarray<>>(xk_out_obj);
 
     if (xk.ndim() != 4 || xk.shape(0) != batch || xk.shape(1) != dim1 ||
         xk.shape(2) != dim2 || xk.shape(3) != head_dim) {
@@ -563,12 +561,12 @@ void apply_rope(nb::ndarray<nb::device::cuda> xq,
 // }
 //
 // void svdquant_quantize_w4a4(
-//     nb::ndarray<nb::device::cuda> x,           // (M, K) bf16/fp16 —
-//     pre-shifted if unsigned path nb::ndarray<nb::device::cuda> smooth, //
-//     (K,) nb::ndarray<nb::device::cuda> lora_down,   // (K, R)
-//     nb::ndarray<nb::device::cuda> q_x,         // (M_pad, K/2) int8
-//     nb::ndarray<nb::device::cuda> ascales,     // (K/G, M_pad)
-//     nb::ndarray<nb::device::cuda> lora_act,    // (M_pad, R) fp32
+//     nb::ndarray< > x,           // (M, K) bf16/fp16 —
+//     pre-shifted if unsigned path nb::ndarray< > smooth, //
+//     (K,) nb::ndarray< > lora_down,   // (K, R)
+//     nb::ndarray< > q_x,         // (M_pad, K/2) int8
+//     nb::ndarray< > ascales,     // (K/G, M_pad)
+//     nb::ndarray< > lora_act,    // (M_pad, R) fp32
 //     bool act_unsigned,
 //     uintptr_t stream_ptr)
 // {
@@ -587,14 +585,14 @@ void apply_rope(nb::ndarray<nb::device::cuda> xq,
 // }
 //
 // void svdquant_scaled_mm_w4a4(
-//     nb::ndarray<nb::device::cuda> act,           // (M, K/2) int8
-//     nb::ndarray<nb::device::cuda> wgt,           // (N, K/2) int8
-//     nb::ndarray<nb::device::cuda> ascales,       // (K/G, M)
-//     nb::ndarray<nb::device::cuda> wscales,       // (K/G, N)
-//     nb::ndarray<nb::device::cuda> lora_act_in,   // (M, R) fp32
-//     nb::ndarray<nb::device::cuda> lora_up,       // (N, R)
-//     nb::ndarray<nb::device::cuda> bias,          // (N,) or empty
-//     nb::ndarray<nb::device::cuda> out,           // (M, N)
+//     nb::ndarray< > act,           // (M, K/2) int8
+//     nb::ndarray< > wgt,           // (N, K/2) int8
+//     nb::ndarray< > ascales,       // (K/G, M)
+//     nb::ndarray< > wscales,       // (K/G, N)
+//     nb::ndarray< > lora_act_in,   // (M, R) fp32
+//     nb::ndarray< > lora_up,       // (N, R)
+//     nb::ndarray< > bias,          // (N,) or empty
+//     nb::ndarray< > out,           // (M, N)
 //     bool act_unsigned,
 //     bool fast_accum,
 //     bool shared_scale,
@@ -652,11 +650,11 @@ void apply_rope(nb::ndarray<nb::device::cuda> xq,
 // //
 // ---------------------------------------------------------------------------
 // void awq_w4a16(
-//     nb::ndarray<nb::device::cuda> x,         // (M, K) bf16/fp16
-//     nb::ndarray<nb::device::cuda> qweight,   // (N, K/2) int8 packed uint4
-//     nb::ndarray<nb::device::cuda> wscales,   // (K/G, N)
-//     nb::ndarray<nb::device::cuda> wzeros,    // (K/G, N)
-//     nb::ndarray<nb::device::cuda> out,       // (M, N)
+//     nb::ndarray< > x,         // (M, K) bf16/fp16
+//     nb::ndarray< > qweight,   // (N, K/2) int8 packed uint4
+//     nb::ndarray< > wscales,   // (K/G, N)
+//     nb::ndarray< > wzeros,    // (K/G, N)
+//     nb::ndarray< > out,       // (M, N)
 //     int group_size,
 //     uintptr_t stream_ptr)
 // {
@@ -675,10 +673,10 @@ void apply_rope(nb::ndarray<nb::device::cuda> xq,
 // }
 
 // Nanobind wrapper for fused AdaLN
-// void adaln(nb::ndarray<nb::device::cuda> x, nb::ndarray<nb::device::cuda>
+// void adaln(nb::ndarray< > x, nb::ndarray< >
 // scale,
-//            nb::ndarray<nb::device::cuda> shift,
-//            nb::ndarray<nb::device::cuda> out, int64_t N, int64_t D,
+//            nb::ndarray< > shift,
+//            nb::ndarray< > out, int64_t N, int64_t D,
 //            int64_t scale_group, int64_t shift_group, float eps, int
 //            dtype_code, uintptr_t stream_ptr) {
 //   hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
@@ -754,11 +752,10 @@ void launch_dequantize_int8_convrot_kernel(const void *input,
 }
 
 // Nanobind wrapper for cublas_gemm_int8
-void cublas_gemm_int8(nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> a,
-                      nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> b,
-                      nb::ndarray<int32_t, nb::ndim<2>, nb::device::cuda> c,
-                      nb::ndarray<nb::device::cuda> workspace,
-                      uintptr_t stream_ptr) {
+void cublas_gemm_int8(nb::ndarray<int8_t, nb::ndim<2>, > a,
+                      nb::ndarray<int8_t, nb::ndim<2>, > b,
+                      nb::ndarray<int32_t, nb::ndim<2>, > c,
+                      nb::ndarray<> workspace, uintptr_t stream_ptr) {
 
   auto &runtime = comfy::HipblasLtRuntime::instance();
   if (!runtime.is_available()) {
@@ -787,11 +784,11 @@ void cublas_gemm_int8(nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> a,
       workspace.size() > 0 ? (int64_t)workspace.size() : 0, stream);
 }
 
-void quantize_int8_rowwise(
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> output,
-    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> scales, bool stochastic,
-    uint64_t seed, uintptr_t stream_ptr) {
+void quantize_int8_rowwise(nb::ndarray<nb::ndim<2>, > input,
+                           nb::ndarray<int8_t, nb::ndim<2>, > output,
+                           nb::ndarray<float, nb::ndim<2>, > scales,
+                           bool stochastic, uint64_t seed,
+                           uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
   const int64_t K = input.shape(1);
@@ -816,14 +813,13 @@ void quantize_int8_rowwise(
 
 // INT8 GEMM + fused dequant (D = acc * xs[m] * ws[n] + bias[n]) via CUTLASS.
 // Returns true on success; false means caller falls back to cuBLAS + dequant.
-bool cutlass_int8_dequant(
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> a, // [M, K]
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> b, // [N, K]
-    nb::ndarray<float, nb::device::cuda> xs,      // [M] per-row act scale
-    nb::ndarray<float, nb::device::cuda> ws,      // [N] per-col weight scale
-    nb::ndarray<nb::device::cuda> bias,           // [N] float or empty
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> d, // [M, N] output
-    int out_dtype_code, uintptr_t stream_ptr) {
+bool cutlass_int8_dequant(nb::ndarray<int8_t, nb::ndim<2>, > a, // [M, K]
+                          nb::ndarray<int8_t, nb::ndim<2>, > b, // [N, K]
+                          nb::ndarray<float, > xs, // [M] per-row act scale
+                          nb::ndarray<float, > ws, // [N] per-col weight scale
+                          nb::ndarray<> bias,      // [N] float or empty
+                          nb::ndarray<nb::ndim<2>, > d, // [M, N] output
+                          int out_dtype_code, uintptr_t stream_ptr) {
   const int64_t M = a.shape(0);
   const int64_t K = a.shape(1);
   const int64_t N = b.shape(0);
@@ -838,11 +834,11 @@ bool cutlass_int8_dequant(
                                      out_dtype_code, stream);
 }
 
-void quantize_int8_rowwise_convrot(
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> output,
-    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> scales,
-    int64_t group_size, bool stochastic, uint64_t seed, uintptr_t stream_ptr) {
+void quantize_int8_rowwise_convrot(nb::ndarray<nb::ndim<2>, > input,
+                                   nb::ndarray<int8_t, nb::ndim<2>, > output,
+                                   nb::ndarray<float, nb::ndim<2>, > scales,
+                                   int64_t group_size, bool stochastic,
+                                   uint64_t seed, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
   const int64_t K = input.shape(1);
@@ -865,10 +861,9 @@ void quantize_int8_rowwise_convrot(
       static_cast<int>(group_size), input_dtype_code, stochastic, seed, stream);
 }
 
-void rotate_int8_convrot_weight(
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> output, int64_t group_size,
-    uintptr_t stream_ptr) {
+void rotate_int8_convrot_weight(nb::ndarray<nb::ndim<2>, > input,
+                                nb::ndarray<nb::ndim<2>, > output,
+                                int64_t group_size, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
   const int64_t K = input.shape(1);
@@ -890,12 +885,11 @@ void rotate_int8_convrot_weight(
 }
 
 void quantize_int8_convrot_staged(
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> rotated,
-    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> partial_absmax,
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> output,
-    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> scales,
-    int64_t group_size, bool stochastic, uint64_t seed, uintptr_t stream_ptr) {
+    nb::ndarray<nb::ndim<2>, > input, nb::ndarray<nb::ndim<2>, > rotated,
+    nb::ndarray<float, nb::ndim<2>, > partial_absmax,
+    nb::ndarray<int8_t, nb::ndim<2>, > output,
+    nb::ndarray<float, nb::ndim<2>, > scales, int64_t group_size,
+    bool stochastic, uint64_t seed, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
   const int64_t K = input.shape(1);
@@ -927,11 +921,11 @@ void quantize_int8_convrot_staged(
       rotated_dtype_code, stochastic, seed, stream);
 }
 
-void quantize_int8_rowwise_convrot64(
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> output,
-    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> scales,
-    int64_t group_size, bool stochastic, uint64_t seed, uintptr_t stream_ptr) {
+void quantize_int8_rowwise_convrot64(nb::ndarray<nb::ndim<2>, > input,
+                                     nb::ndarray<int8_t, nb::ndim<2>, > output,
+                                     nb::ndarray<float, nb::ndim<2>, > scales,
+                                     int64_t group_size, bool stochastic,
+                                     uint64_t seed, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
   const int64_t K = input.shape(1);
@@ -954,13 +948,12 @@ void quantize_int8_rowwise_convrot64(
       static_cast<int>(group_size), input_dtype_code, stochastic, seed, stream);
 }
 
-void dequantize_int8_linear(
-    nb::ndarray<int32_t, nb::ndim<2>, nb::device::cuda> input,
-    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> x_scales,
-    nb::ndarray<float, nb::device::cuda> weight_scales,
-    nb::ndarray<nb::device::cuda> bias,
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> output, int output_dtype_code,
-    uintptr_t stream_ptr) {
+void dequantize_int8_linear(nb::ndarray<int32_t, nb::ndim<2>, > input,
+                            nb::ndarray<float, nb::ndim<2>, > x_scales,
+                            nb::ndarray<float, > weight_scales,
+                            nb::ndarray<> bias,
+                            nb::ndarray<nb::ndim<2>, > output,
+                            int output_dtype_code, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
   const int64_t N = input.shape(1);
@@ -995,14 +988,12 @@ void dequantize_int8_linear(
       bias_dtype_code, stream);
 }
 
-void int8_gemv_dequant(
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> input,
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> weight,
-    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> x_scales,
-    nb::ndarray<float, nb::device::cuda> weight_scales,
-    nb::ndarray<nb::device::cuda> bias,
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> output, int output_dtype_code,
-    uintptr_t stream_ptr) {
+void int8_gemv_dequant(nb::ndarray<int8_t, nb::ndim<2>, > input,
+                       nb::ndarray<int8_t, nb::ndim<2>, > weight,
+                       nb::ndarray<float, nb::ndim<2>, > x_scales,
+                       nb::ndarray<float, > weight_scales, nb::ndarray<> bias,
+                       nb::ndarray<nb::ndim<2>, > output, int output_dtype_code,
+                       uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
   const int64_t K = input.shape(1);
@@ -1043,15 +1034,13 @@ void int8_gemv_dequant(
       bias_dtype_code, stream);
 }
 
-void int8_linear_m1(
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> q_scratch,
-    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> x_scales,
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> weight,
-    nb::ndarray<float, nb::device::cuda> weight_scales,
-    nb::ndarray<nb::device::cuda> bias,
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> output, int output_dtype_code,
-    bool convrot, int group_size, uintptr_t stream_ptr) {
+void int8_linear_m1(nb::ndarray<nb::ndim<2>, > input,
+                    nb::ndarray<int8_t, nb::ndim<2>, > q_scratch,
+                    nb::ndarray<float, nb::ndim<2>, > x_scales,
+                    nb::ndarray<int8_t, nb::ndim<2>, > weight,
+                    nb::ndarray<float, > weight_scales, nb::ndarray<> bias,
+                    nb::ndarray<nb::ndim<2>, > output, int output_dtype_code,
+                    bool convrot, int group_size, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
   const int64_t K = input.shape(1);
@@ -1113,9 +1102,8 @@ void int8_linear_m1(
       bias_dtype_code, stream);
 }
 
-void dequantize_int8_simple(nb::ndarray<int8_t, nb::device::cuda> input,
-                            nb::ndarray<float, nb::device::cuda> scale,
-                            nb::ndarray<nb::device::cuda> output,
+void dequantize_int8_simple(nb::ndarray<int8_t, > input,
+                            nb::ndarray<float, > scale, nb::ndarray<> output,
                             int64_t inner_dim, int scale_mode,
                             uintptr_t stream_ptr) {
 
@@ -1149,11 +1137,10 @@ void dequantize_int8_simple(nb::ndarray<int8_t, nb::device::cuda> input,
       output_dtype_code, stream);
 }
 
-void dequantize_int8_convrot_weight(
-    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> input,
-    nb::ndarray<float, nb::device::cuda> scale,
-    nb::ndarray<nb::ndim<2>, nb::device::cuda> output, int64_t group_size,
-    uintptr_t stream_ptr) {
+void dequantize_int8_convrot_weight(nb::ndarray<int8_t, nb::ndim<2>, > input,
+                                    nb::ndarray<float, > scale,
+                                    nb::ndarray<nb::ndim<2>, > output,
+                                    int64_t group_size, uintptr_t stream_ptr) {
 
   const int64_t M = input.shape(0);
   const int64_t K = input.shape(1);
