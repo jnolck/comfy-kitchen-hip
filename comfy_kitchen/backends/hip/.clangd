@@ -1,19 +1,25 @@
 CompileFlags:
-  Add:
-    [
+  Add: [
       "-x",
-      "cuda",
-      "--cuda-path=/usr/local/cuda",
-      "-I/usr/local/cuda/include",
-      "-I/usr/local/cuda/include/cccl",
-      "--no-cuda-version-check",
+      "hip",
+      "-D__HIP_PLATFORM_AMD__=1",
+      "--cuda-gpu-arch=gfx1100", # Adjust to your exact target GPU (e.g., gfx942 or gfx1100)
+      "-I/var/home/jnolck/Documents/src/ai/comfy-kitchen/third_party/composable_kernel/include",
+      "-I/home/jnolck/Documents/src/ai/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/include",
+      "-I/home/jnolck/Documents/src/ai/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/include/hip",
+      "-I/home/jnolck/Documents/src/ai/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/include/hipblas/",
+      "-I/home/jnolck/Documents/src/ai/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/include/hipblaslt",
       "-I/home/jnolck/Documents/src/ai/.venv/lib/python3.12/site-packages/nanobind/include/",
       "-I/var/home/jnolck/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/include/python3.12",
-      "-I/home/jnolck/Documents/src/ai/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/include",
-      "-I/home/jnolck/Documents/src/ai/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/include/hipblaslt",
-      "-D__HIP_PLATFORM_AMD__",
       "-I.",
       "-Iops/",
       "-std=c++17",
     ]
-  Remove: ["-forward-unknown-to-host-compiler", "-rdc=true", "-gencode"]
+  Remove:
+    [
+      "-forward-unknown-to-host-compiler",
+      "-rdc=true",
+      "-gencode",
+      "--cuda-path*",
+      "-bc*",
+    ]
