@@ -21,13 +21,13 @@ import sys
 import torch
 
 __all__ = [
-    "adaln",
+    # "adaln",
     "apply_rope",
     "apply_rope1",
     "apply_rope_split_half",
     "apply_rope_split_half1",
     # "dequantize_nvfp4",
-    "dequantize_per_tensor_fp8",
+    # "dequantize_per_tensor_fp8",
     "dequantize_int8_simple",
     "dequantize_int8_simple_dtype",
     "dequantize_int8_convrot_weight",
@@ -41,11 +41,11 @@ __all__ = [
     # "gemv_awq_w4a16",
     # "quantize_mxfp8",
     # "quantize_nvfp4",
-    "quantize_per_tensor_fp8",
+    # "quantize_per_tensor_fp8",
     # "quantize_svdquant_w4a4",
     # "scaled_mm_nvfp4",
     # "scaled_mm_svdquant_w4a4",
-    "stochastic_rounding_fp8",
+    # "stochastic_rounding_fp8",
 ]
 
 
@@ -310,79 +310,79 @@ def _wrap_for_dlpack(tensor: torch.Tensor):
     return tensor.__dlpack__(stream=-1)
 
 
-def quantize_per_tensor_fp8(
-    x: torch.Tensor, scale: torch.Tensor, output_type: torch.dtype = torch.float8_e4m3fn
-) -> torch.Tensor:
-    input_dtype_code = DTYPE_TO_CODE[x.dtype]
-    output_dtype_code = DTYPE_TO_CODE[output_type]
+# def quantize_per_tensor_fp8(
+#     x: torch.Tensor, scale: torch.Tensor, output_type: torch.dtype = torch.float8_e4m3fn
+# ) -> torch.Tensor:
+#     input_dtype_code = DTYPE_TO_CODE[x.dtype]
+#     output_dtype_code = DTYPE_TO_CODE[output_type]
+#
+#     if not x.is_contiguous():
+#         x = x.contiguous()
+#
+#     result_uint8 = torch.empty(x.shape, dtype=torch.uint8, device=x.device)
+#
+#     numel = x.numel()
+#     stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
+#     _C.quantize_per_tensor_fp8(
+#         _wrap_for_dlpack(x),
+#         _wrap_for_dlpack(scale),
+#         _wrap_for_dlpack(result_uint8),
+#         input_dtype_code,
+#         output_dtype_code,
+#         numel,
+#         stream_ptr,
+#     )
+#
+#     return result_uint8.view(output_type)
+#
+#
+# def dequantize_per_tensor_fp8(
+#     x: torch.Tensor, scale: torch.Tensor, output_type: torch.dtype = torch.bfloat16
+# ) -> torch.Tensor:
+#     assert scale.numel() == 1, "Scale must be a scalar tensor"
+#
+#     input_dtype_code = DTYPE_TO_CODE[x.dtype]
+#     output_dtype_code = DTYPE_TO_CODE[output_type]
+#
+#     result = torch.empty(x.shape, dtype=output_type, device=x.device)
+#     numel = x.numel()
+#     stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
+#
+#     _C.dequantize_per_tensor_fp8(
+#         _wrap_for_dlpack(x.view(torch.uint8)),
+#         _wrap_for_dlpack(scale),
+#         _wrap_for_dlpack(result),
+#         input_dtype_code,
+#         output_dtype_code,
+#         numel,
+#         stream_ptr,
+#     )
+#
+#     return result
 
-    if not x.is_contiguous():
-        x = x.contiguous()
 
-    result_uint8 = torch.empty(x.shape, dtype=torch.uint8, device=x.device)
-
-    numel = x.numel()
-    stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
-    _C.quantize_per_tensor_fp8(
-        _wrap_for_dlpack(x),
-        _wrap_for_dlpack(scale),
-        _wrap_for_dlpack(result_uint8),
-        input_dtype_code,
-        output_dtype_code,
-        numel,
-        stream_ptr,
-    )
-
-    return result_uint8.view(output_type)
-
-
-def dequantize_per_tensor_fp8(
-    x: torch.Tensor, scale: torch.Tensor, output_type: torch.dtype = torch.bfloat16
-) -> torch.Tensor:
-    assert scale.numel() == 1, "Scale must be a scalar tensor"
-
-    input_dtype_code = DTYPE_TO_CODE[x.dtype]
-    output_dtype_code = DTYPE_TO_CODE[output_type]
-
-    result = torch.empty(x.shape, dtype=output_type, device=x.device)
-    numel = x.numel()
-    stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
-
-    _C.dequantize_per_tensor_fp8(
-        _wrap_for_dlpack(x.view(torch.uint8)),
-        _wrap_for_dlpack(scale),
-        _wrap_for_dlpack(result),
-        input_dtype_code,
-        output_dtype_code,
-        numel,
-        stream_ptr,
-    )
-
-    return result
-
-
-def stochastic_rounding_fp8(
-    x: torch.Tensor,
-    rng: torch.Tensor,
-    output_type: torch.dtype = torch.float8_e4m3fn,
-) -> torch.Tensor:
-    output_dtype_code = DTYPE_TO_CODE[output_type]
-
-    if not x.is_contiguous():
-        x = x.contiguous()
-    if not rng.is_contiguous():
-        rng = rng.contiguous()
-
-    stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
-    _C.stochastic_round_fp8(
-        _wrap_for_dlpack(rng),
-        _wrap_for_dlpack(x),
-        output_dtype_code,
-        x.numel(),
-        stream_ptr,
-    )
-
-    return rng.view(output_type)
+# def stochastic_rounding_fp8(
+#     x: torch.Tensor,
+#     rng: torch.Tensor,
+#     output_type: torch.dtype = torch.float8_e4m3fn,
+# ) -> torch.Tensor:
+#     output_dtype_code = DTYPE_TO_CODE[output_type]
+#
+#     if not x.is_contiguous():
+#         x = x.contiguous()
+#     if not rng.is_contiguous():
+#         rng = rng.contiguous()
+#
+#     stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
+#     _C.stochastic_round_fp8(
+#         _wrap_for_dlpack(rng),
+#         _wrap_for_dlpack(x),
+#         output_dtype_code,
+#         x.numel(),
+#         stream_ptr,
+#     )
+#
+#     return rng.view(output_type)
 
 
 # def quantize_nvfp4(
@@ -1118,39 +1118,39 @@ def int8_linear(
     return out if is_2d_output else out.reshape(*orig_shape[:-1], n)
 
 
-def adaln(
-    x: torch.Tensor, scale: torch.Tensor, shift: torch.Tensor, eps: float = 1e-6
-) -> torch.Tensor:
-    orig_shape = x.shape
-    d = x.shape[-1]
-    n = x.numel() // d
-
-    x_flat = x.reshape(n, d)
-    if not x_flat.is_contiguous():
-        x_flat = x_flat.contiguous()
-
-    scale_flat, scale_group = adaln_prep_modulation(scale, x, n, d)
-    shift_flat, shift_group = adaln_prep_modulation(shift, x, n, d)
-
-    out_flat = torch.empty_like(x_flat)
-    dtype_code = DTYPE_TO_CODE[x.dtype]
-    stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
-
-    _C.adaln(
-        _wrap_for_dlpack(x_flat),
-        _wrap_for_dlpack(scale_flat),
-        _wrap_for_dlpack(shift_flat),
-        _wrap_for_dlpack(out_flat),
-        n,
-        d,
-        scale_group,
-        shift_group,
-        eps,
-        dtype_code,
-        stream_ptr,
-    )
-
-    return out_flat.reshape(orig_shape)
+# def adaln(
+#     x: torch.Tensor, scale: torch.Tensor, shift: torch.Tensor, eps: float = 1e-6
+# ) -> torch.Tensor:
+#     orig_shape = x.shape
+#     d = x.shape[-1]
+#     n = x.numel() // d
+#
+#     x_flat = x.reshape(n, d)
+#     if not x_flat.is_contiguous():
+#         x_flat = x_flat.contiguous()
+#
+#     scale_flat, scale_group = adaln_prep_modulation(scale, x, n, d)
+#     shift_flat, shift_group = adaln_prep_modulation(shift, x, n, d)
+#
+#     out_flat = torch.empty_like(x_flat)
+#     dtype_code = DTYPE_TO_CODE[x.dtype]
+#     stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
+#
+#     _C.adaln(
+#         _wrap_for_dlpack(x_flat),
+#         _wrap_for_dlpack(scale_flat),
+#         _wrap_for_dlpack(shift_flat),
+#         _wrap_for_dlpack(out_flat),
+#         n,
+#         d,
+#         scale_group,
+#         shift_group,
+#         eps,
+#         dtype_code,
+#         stream_ptr,
+#     )
+#
+#     return out_flat.reshape(orig_shape)
 
 
 def apply_rope1(x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tensor:
@@ -1572,60 +1572,60 @@ def _build_constraints() -> dict:
     cuda_devices = frozenset({"cuda"})
 
     constraints = {
-        "adaln": FunctionConstraints(
-            params={
-                "x": ParamConstraint(
-                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
-                ),
-                "scale": ParamConstraint(
-                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
-                ),
-                "shift": ParamConstraint(
-                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
-                ),
-            },
-            default_devices=cuda_devices,
-        ),
-        "quantize_per_tensor_fp8": FunctionConstraints(
-            params={
-                "x": ParamConstraint(
-                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
-                ),
-                "scale": ParamConstraint(
-                    dtypes=frozenset({torch.float32}),
-                ),
-                "output_type": ParamConstraint(
-                    dtypes=frozenset({torch.float8_e4m3fn, torch.float8_e5m2}),
-                ),
-            },
-            default_devices=cuda_devices,
-        ),
-        "dequantize_per_tensor_fp8": FunctionConstraints(
-            params={
-                "x": ParamConstraint(
-                    dtypes=frozenset({torch.float8_e4m3fn, torch.float8_e5m2}),
-                ),
-                "scale": ParamConstraint(
-                    dtypes=frozenset({torch.float32}),
-                ),
-                "output_type": ParamConstraint(
-                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
-                ),
-            },
-            default_devices=cuda_devices,
-        ),
-        "stochastic_rounding_fp8": FunctionConstraints(
-            params={
-                "x": ParamConstraint(
-                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
-                ),
-                "rng": ParamConstraint(dtypes=frozenset({torch.uint8})),
-                "output_type": ParamConstraint(
-                    dtypes=frozenset({torch.float8_e4m3fn, torch.float8_e5m2}),
-                ),
-            },
-            default_devices=cuda_devices,
-        ),
+        # "adaln": FunctionConstraints(
+        #     params={
+        #         "x": ParamConstraint(
+        #             dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+        #         ),
+        #         "scale": ParamConstraint(
+        #             dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+        #         ),
+        #         "shift": ParamConstraint(
+        #             dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+        #         ),
+        #     },
+        #     default_devices=cuda_devices,
+        # ),
+        # "quantize_per_tensor_fp8": FunctionConstraints(
+        #     params={
+        #         "x": ParamConstraint(
+        #             dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+        #         ),
+        #         "scale": ParamConstraint(
+        #             dtypes=frozenset({torch.float32}),
+        #         ),
+        #         "output_type": ParamConstraint(
+        #             dtypes=frozenset({torch.float8_e4m3fn, torch.float8_e5m2}),
+        #         ),
+        #     },
+        #     default_devices=cuda_devices,
+        # ),
+        # "dequantize_per_tensor_fp8": FunctionConstraints(
+        #     params={
+        #         "x": ParamConstraint(
+        #             dtypes=frozenset({torch.float8_e4m3fn, torch.float8_e5m2}),
+        #         ),
+        #         "scale": ParamConstraint(
+        #             dtypes=frozenset({torch.float32}),
+        #         ),
+        #         "output_type": ParamConstraint(
+        #             dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+        #         ),
+        #     },
+        #     default_devices=cuda_devices,
+        # ),
+        # "stochastic_rounding_fp8": FunctionConstraints(
+        #     params={
+        #         "x": ParamConstraint(
+        #             dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+        #         ),
+        #         "rng": ParamConstraint(dtypes=frozenset({torch.uint8})),
+        #         "output_type": ParamConstraint(
+        #             dtypes=frozenset({torch.float8_e4m3fn, torch.float8_e5m2}),
+        #         ),
+        #     },
+        #     default_devices=cuda_devices,
+        # ),
         # "quantize_nvfp4": FunctionConstraints(
         #     params={
         #         "x": ParamConstraint(
@@ -1936,15 +1936,15 @@ def _build_constraints() -> dict:
 def _register():
     """Register CUDA backend with the global registry."""
     if not _EXT_AVAILABLE:
-        registry.mark_unavailable("hip", _EXT_ERROR)
+        registry.mark_unavailable("cuda", _EXT_ERROR)
         return
 
     if not torch.cuda.is_available():
-        registry.mark_unavailable("hip", "CUDA not available on this system")
+        registry.mark_unavailable("cuda", "CUDA not available on this system")
         return
 
     registry.register(
-        name="hip",
+        name="cuda",
         module=__import__(__name__, fromlist=__all__),
         capabilities=_build_constraints(),
     )
