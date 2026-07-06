@@ -746,6 +746,8 @@ extern "C" {
         int64_t num_rows,
         int64_t num_cols,
         int input_dtype_code,
+        bool stochastic,
+        uint64_t seed,
         cudaStream_t stream);
 
     bool launch_cutlass_int8_dequant(
@@ -769,6 +771,45 @@ extern "C" {
         int64_t num_cols,
         int group_size,
         int input_dtype_code,
+        bool stochastic,
+        uint64_t seed,
+        cudaStream_t stream);
+
+    void launch_rotate_int8_convrot_weight_kernel(
+        const void* input,
+        void* output,
+        int64_t num_rows,
+        int64_t num_cols,
+        int group_size,
+        int input_dtype_code,
+        int output_dtype_code,
+        cudaStream_t stream);
+
+    void launch_quantize_int8_convrot_staged_kernel(
+        const void* input,
+        void* rotated,
+        void* partial_absmax,
+        void* output,
+        void* scales,
+        int64_t num_rows,
+        int64_t num_cols,
+        int group_size,
+        int input_dtype_code,
+        int rotated_dtype_code,
+        bool stochastic,
+        uint64_t seed,
+        cudaStream_t stream);
+
+    void launch_quantize_int8_rowwise_convrot64_kernel(
+        const void* input,
+        void* output,
+        void* scales,
+        int64_t num_rows,
+        int64_t num_cols,
+        int group_size,
+        int input_dtype_code,
+        bool stochastic,
+        uint64_t seed,
         cudaStream_t stream);
 
     void launch_dequantize_int8_linear_kernel(
@@ -783,6 +824,42 @@ extern "C" {
         bool has_bias,
         int output_dtype_code,
         int bias_dtype_code,
+        cudaStream_t stream);
+
+    void launch_int8_gemv_dequant_kernel(
+        const void* input,
+        const void* weight,
+        const void* x_scales,
+        const void* weight_scales,
+        const void* bias,
+        void* output,
+        int64_t num_cols,
+        int64_t K,
+        int64_t weight_scale_size,
+        bool has_bias,
+        int output_dtype_code,
+        int bias_dtype_code,
+        cudaStream_t stream);
+
+    void launch_dequantize_int8_simple_kernel(
+        const void* input,
+        const void* scales,
+        void* output,
+        int64_t total,
+        int64_t inner_dim,
+        int scale_mode,
+        int output_dtype_code,
+        cudaStream_t stream);
+
+    void launch_dequantize_int8_convrot_kernel(
+        const void* input,
+        const void* scales,
+        void* output,
+        int64_t num_rows,
+        int64_t num_cols,
+        int64_t scale_size,
+        int group_size,
+        int output_dtype_code,
         cudaStream_t stream);
 
 }
@@ -830,6 +907,8 @@ void quantize_int8_rowwise(
     nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
     nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> output,
     nb::ndarray<float, nb::ndim<2>, nb::device::cuda> scales,
+    bool stochastic,
+    uint64_t seed,
     uintptr_t stream_ptr) {
 
     const int64_t M = input.shape(0);
@@ -841,7 +920,6 @@ void quantize_int8_rowwise(
     if (scales.shape(0) != M || scales.shape(1) != 1) {
         throw std::runtime_error("INT8 rowwise quantization scale shape mismatch");
     }
-
     const int input_dtype_code = map_dtype_to_code(input.dtype());
     if (input_dtype_code < 0 || input_dtype_code > 2) {
         throw std::runtime_error("Unsupported input dtype for INT8 rowwise quantization");
@@ -855,6 +933,8 @@ void quantize_int8_rowwise(
         M,
         K,
         input_dtype_code,
+        stochastic,
+        seed,
         stream);
 }
 
@@ -885,6 +965,8 @@ void quantize_int8_rowwise_convrot(
     nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> output,
     nb::ndarray<float, nb::ndim<2>, nb::device::cuda> scales,
     int64_t group_size,
+    bool stochastic,
+    uint64_t seed,
     uintptr_t stream_ptr) {
 
     const int64_t M = input.shape(0);
@@ -896,7 +978,6 @@ void quantize_int8_rowwise_convrot(
     if (scales.shape(0) != M || scales.shape(1) != 1) {
         throw std::runtime_error("INT8 rowwise convrot scale shape mismatch");
     }
-
     const int input_dtype_code = map_dtype_to_code(input.dtype());
     if (input_dtype_code < 0 || input_dtype_code > 2) {
         throw std::runtime_error("Unsupported input dtype for INT8 rowwise convrot quantization");
@@ -911,6 +992,124 @@ void quantize_int8_rowwise_convrot(
         K,
         static_cast<int>(group_size),
         input_dtype_code,
+        stochastic,
+        seed,
+        stream);
+}
+
+void rotate_int8_convrot_weight(
+    nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
+    nb::ndarray<nb::ndim<2>, nb::device::cuda> output,
+    int64_t group_size,
+    uintptr_t stream_ptr) {
+
+    const int64_t M = input.shape(0);
+    const int64_t K = input.shape(1);
+    if (output.shape(0) != M || output.shape(1) != K) {
+        throw std::runtime_error("ConvRot rotate output shape mismatch");
+    }
+
+    const int input_dtype_code = map_dtype_to_code(input.dtype());
+    const int output_dtype_code = map_dtype_to_code(output.dtype());
+    if (input_dtype_code < 0 || input_dtype_code > 2 || output_dtype_code < 0 || output_dtype_code > 2) {
+        throw std::runtime_error("Unsupported dtype for ConvRot rotate");
+    }
+
+    cudaStream_t stream = reinterpret_cast<cudaStream_t>(stream_ptr);
+    launch_rotate_int8_convrot_weight_kernel(
+        input.data(),
+        output.data(),
+        M,
+        K,
+        static_cast<int>(group_size),
+        input_dtype_code,
+        output_dtype_code,
+        stream);
+}
+
+void quantize_int8_convrot_staged(
+    nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
+    nb::ndarray<nb::ndim<2>, nb::device::cuda> rotated,
+    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> partial_absmax,
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> output,
+    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> scales,
+    int64_t group_size,
+    bool stochastic,
+    uint64_t seed,
+    uintptr_t stream_ptr) {
+
+    const int64_t M = input.shape(0);
+    const int64_t K = input.shape(1);
+    if (rotated.shape(0) != M || rotated.shape(1) != K) {
+        throw std::runtime_error("ConvRot staged rotated shape mismatch");
+    }
+    if (output.shape(0) != M || output.shape(1) != K) {
+        throw std::runtime_error("ConvRot staged output shape mismatch");
+    }
+    if (scales.shape(0) != M || scales.shape(1) != 1) {
+        throw std::runtime_error("ConvRot staged scale shape mismatch");
+    }
+    const int64_t n_groups = group_size > 0 ? K / group_size : 0;
+    if (partial_absmax.shape(0) != M || partial_absmax.shape(1) != n_groups) {
+        throw std::runtime_error("ConvRot staged partial absmax shape mismatch");
+    }
+    const int input_dtype_code = map_dtype_to_code(input.dtype());
+    const int rotated_dtype_code = map_dtype_to_code(rotated.dtype());
+    if (input_dtype_code < 0 || input_dtype_code > 2 || rotated_dtype_code < 0 || rotated_dtype_code > 2) {
+        throw std::runtime_error("Unsupported dtype for ConvRot staged quantization");
+    }
+
+    cudaStream_t stream = reinterpret_cast<cudaStream_t>(stream_ptr);
+    launch_quantize_int8_convrot_staged_kernel(
+        input.data(),
+        rotated.data(),
+        partial_absmax.data(),
+        output.data(),
+        scales.data(),
+        M,
+        K,
+        static_cast<int>(group_size),
+        input_dtype_code,
+        rotated_dtype_code,
+        stochastic,
+        seed,
+        stream);
+}
+
+void quantize_int8_rowwise_convrot64(
+    nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> output,
+    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> scales,
+    int64_t group_size,
+    bool stochastic,
+    uint64_t seed,
+    uintptr_t stream_ptr) {
+
+    const int64_t M = input.shape(0);
+    const int64_t K = input.shape(1);
+
+    if (output.shape(0) != M || output.shape(1) != K) {
+        throw std::runtime_error("INT8 rowwise convrot64 output shape mismatch");
+    }
+    if (scales.shape(0) != M || scales.shape(1) != 1) {
+        throw std::runtime_error("INT8 rowwise convrot64 scale shape mismatch");
+    }
+    const int input_dtype_code = map_dtype_to_code(input.dtype());
+    if (input_dtype_code < 0 || input_dtype_code > 2) {
+        throw std::runtime_error("Unsupported input dtype for INT8 rowwise convrot64 quantization");
+    }
+
+    cudaStream_t stream = reinterpret_cast<cudaStream_t>(stream_ptr);
+    launch_quantize_int8_rowwise_convrot64_kernel(
+        input.data(),
+        output.data(),
+        scales.data(),
+        M,
+        K,
+        static_cast<int>(group_size),
+        input_dtype_code,
+        stochastic,
+        seed,
         stream);
 }
 
@@ -961,6 +1160,230 @@ void dequantize_int8_linear(
         has_bias,
         output_dtype_code,
         bias_dtype_code,
+        stream);
+}
+
+void int8_gemv_dequant(
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> input,
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> weight,
+    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> x_scales,
+    nb::ndarray<float, nb::device::cuda> weight_scales,
+    nb::ndarray<nb::device::cuda> bias,
+    nb::ndarray<nb::ndim<2>, nb::device::cuda> output,
+    int output_dtype_code,
+    uintptr_t stream_ptr) {
+
+    const int64_t M = input.shape(0);
+    const int64_t K = input.shape(1);
+    const int64_t N = weight.shape(0);
+    if (M != 1) {
+        throw std::runtime_error("INT8 GEMV dequant expects M == 1");
+    }
+    if (weight.shape(1) != K) {
+        throw std::runtime_error("INT8 GEMV weight K mismatch");
+    }
+    if (x_scales.shape(0) != 1 || x_scales.shape(1) != 1) {
+        throw std::runtime_error("INT8 GEMV activation scale shape mismatch");
+    }
+    if (output.shape(0) != 1 || output.shape(1) != N) {
+        throw std::runtime_error("INT8 GEMV output shape mismatch");
+    }
+    if (output_dtype_code < 0 || output_dtype_code > 2) {
+        throw std::runtime_error("Invalid INT8 GEMV output dtype code");
+    }
+
+    const bool has_bias = bias.data() && bias.size() > 0;
+    int bias_dtype_code = output_dtype_code;
+    if (has_bias) {
+        if (bias.shape(0) != N) {
+            throw std::runtime_error("INT8 GEMV bias shape mismatch");
+        }
+        bias_dtype_code = map_dtype_to_code(bias.dtype());
+        if (bias_dtype_code < 0 || bias_dtype_code > 2) {
+            throw std::runtime_error("Unsupported bias dtype for INT8 GEMV");
+        }
+    }
+
+    cudaStream_t stream = reinterpret_cast<cudaStream_t>(stream_ptr);
+    launch_int8_gemv_dequant_kernel(
+        input.data(),
+        weight.data(),
+        x_scales.data(),
+        weight_scales.data(),
+        has_bias ? bias.data() : nullptr,
+        output.data(),
+        N,
+        K,
+        static_cast<int64_t>(weight_scales.size()),
+        has_bias,
+        output_dtype_code,
+        bias_dtype_code,
+        stream);
+}
+
+void int8_linear_m1(
+    nb::ndarray<nb::ndim<2>, nb::device::cuda> input,
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> q_scratch,
+    nb::ndarray<float, nb::ndim<2>, nb::device::cuda> x_scales,
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> weight,
+    nb::ndarray<float, nb::device::cuda> weight_scales,
+    nb::ndarray<nb::device::cuda> bias,
+    nb::ndarray<nb::ndim<2>, nb::device::cuda> output,
+    int output_dtype_code,
+    bool convrot,
+    int group_size,
+    uintptr_t stream_ptr) {
+
+    const int64_t M = input.shape(0);
+    const int64_t K = input.shape(1);
+    const int64_t N = weight.shape(0);
+    if (M != 1) {
+        throw std::runtime_error("INT8 M=1 linear expects input M == 1");
+    }
+    if (weight.shape(1) != K) {
+        throw std::runtime_error("INT8 M=1 linear weight K mismatch");
+    }
+    if (q_scratch.shape(0) != 1 || q_scratch.shape(1) != K) {
+        throw std::runtime_error("INT8 M=1 linear q scratch shape mismatch");
+    }
+    if (x_scales.shape(0) != 1 || x_scales.shape(1) != 1) {
+        throw std::runtime_error("INT8 M=1 linear activation scale shape mismatch");
+    }
+    if (output.shape(0) != 1 || output.shape(1) != N) {
+        throw std::runtime_error("INT8 M=1 linear output shape mismatch");
+    }
+    if (output_dtype_code < 0 || output_dtype_code > 2) {
+        throw std::runtime_error("Invalid INT8 M=1 linear output dtype code");
+    }
+    if (convrot && (group_size != 256 || K % 256 != 0)) {
+        throw std::runtime_error("INT8 M=1 ConvRot linear requires group_size 256 and K divisible by 256");
+    }
+
+    const int input_dtype_code = map_dtype_to_code(input.dtype());
+    if (input_dtype_code < 0 || input_dtype_code > 2) {
+        throw std::runtime_error("Unsupported input dtype for INT8 M=1 linear");
+    }
+
+    const bool has_bias = bias.data() && bias.size() > 0;
+    int bias_dtype_code = output_dtype_code;
+    if (has_bias) {
+        if (bias.shape(0) != N) {
+            throw std::runtime_error("INT8 M=1 linear bias shape mismatch");
+        }
+        bias_dtype_code = map_dtype_to_code(bias.dtype());
+        if (bias_dtype_code < 0 || bias_dtype_code > 2) {
+            throw std::runtime_error("Unsupported bias dtype for INT8 M=1 linear");
+        }
+    }
+
+    cudaStream_t stream = reinterpret_cast<cudaStream_t>(stream_ptr);
+    if (convrot) {
+        launch_quantize_int8_rowwise_convrot64_kernel(
+            input.data(),
+            q_scratch.data(),
+            x_scales.data(),
+            M,
+            K,
+            group_size,
+            input_dtype_code,
+            false,
+            0,
+            stream);
+    } else {
+        launch_quantize_int8_rowwise_kernel(
+            input.data(),
+            q_scratch.data(),
+            x_scales.data(),
+            M,
+            K,
+            input_dtype_code,
+            false,
+            0,
+            stream);
+    }
+    launch_int8_gemv_dequant_kernel(
+        q_scratch.data(),
+        weight.data(),
+        x_scales.data(),
+        weight_scales.data(),
+        has_bias ? bias.data() : nullptr,
+        output.data(),
+        N,
+        K,
+        static_cast<int64_t>(weight_scales.size()),
+        has_bias,
+        output_dtype_code,
+        bias_dtype_code,
+        stream);
+}
+
+void dequantize_int8_simple(
+    nb::ndarray<int8_t, nb::device::cuda> input,
+    nb::ndarray<float, nb::device::cuda> scale,
+    nb::ndarray<nb::device::cuda> output,
+    int64_t inner_dim,
+    int scale_mode,
+    uintptr_t stream_ptr) {
+
+    if (output.size() != input.size()) {
+        throw std::runtime_error("INT8 simple dequantization output shape mismatch");
+    }
+    if (scale_mode == 0 && scale.size() != 1) {
+        throw std::runtime_error("INT8 simple dequantization scalar scale shape mismatch");
+    }
+    if (scale_mode == 1 && scale.size() != input.size()) {
+        throw std::runtime_error("INT8 simple dequantization elementwise scale shape mismatch");
+    }
+    if (scale_mode == 2 && (inner_dim <= 0 || input.size() % inner_dim != 0 || scale.size() != input.size() / inner_dim)) {
+        throw std::runtime_error("INT8 simple dequantization rowwise scale shape mismatch");
+    }
+    const int output_dtype_code = map_dtype_to_code(output.dtype());
+    if (output_dtype_code < 0 || output_dtype_code > 2) {
+        throw std::runtime_error("Unsupported output dtype for INT8 simple dequantization");
+    }
+
+    cudaStream_t stream = reinterpret_cast<cudaStream_t>(stream_ptr);
+    launch_dequantize_int8_simple_kernel(
+        input.data(),
+        scale.data(),
+        output.data(),
+        static_cast<int64_t>(input.size()),
+        inner_dim,
+        scale_mode,
+        output_dtype_code,
+        stream);
+}
+
+void dequantize_int8_convrot_weight(
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::cuda> input,
+    nb::ndarray<float, nb::device::cuda> scale,
+    nb::ndarray<nb::ndim<2>, nb::device::cuda> output,
+    int64_t group_size,
+    uintptr_t stream_ptr) {
+
+    const int64_t M = input.shape(0);
+    const int64_t K = input.shape(1);
+    if (output.shape(0) != M || output.shape(1) != K) {
+        throw std::runtime_error("INT8 convrot dequant output shape mismatch");
+    }
+    if (scale.size() != 1 && scale.size() != static_cast<size_t>(M)) {
+        throw std::runtime_error("INT8 convrot dequant scale must be scalar or per-row");
+    }
+    const int output_dtype_code = map_dtype_to_code(output.dtype());
+    if (output_dtype_code < 0 || output_dtype_code > 2) {
+        throw std::runtime_error("Unsupported output dtype for INT8 convrot dequantization");
+    }
+
+    cudaStream_t stream = reinterpret_cast<cudaStream_t>(stream_ptr);
+    launch_dequantize_int8_convrot_kernel(
+        input.data(),
+        scale.data(),
+        output.data(),
+        M,
+        K,
+        static_cast<int64_t>(scale.size()),
+        static_cast<int>(group_size),
+        output_dtype_code,
         stream);
 }
 
@@ -1022,6 +1445,8 @@ NB_MODULE(_C, m) {
           nb::arg("input"),
           nb::arg("output"),
           nb::arg("scales"),
+          nb::arg("stochastic"),
+          nb::arg("seed"),
           nb::arg("stream_ptr"));
 
     m.def("cutlass_int8_dequant", &cutlass_int8_dequant,
@@ -1041,6 +1466,37 @@ NB_MODULE(_C, m) {
           nb::arg("output"),
           nb::arg("scales"),
           nb::arg("group_size"),
+          nb::arg("stochastic"),
+          nb::arg("seed"),
+          nb::arg("stream_ptr"));
+
+    m.def("rotate_int8_convrot_weight", &rotate_int8_convrot_weight,
+          "ConvRot Hadamard weight rotation",
+          nb::arg("input"),
+          nb::arg("output"),
+          nb::arg("group_size"),
+          nb::arg("stream_ptr"));
+
+    m.def("quantize_int8_convrot_staged", &quantize_int8_convrot_staged,
+          "ConvRot rotation with partial absmax followed by INT8 rowwise quantization",
+          nb::arg("input"),
+          nb::arg("rotated"),
+          nb::arg("partial_absmax"),
+          nb::arg("output"),
+          nb::arg("scales"),
+          nb::arg("group_size"),
+          nb::arg("stochastic"),
+          nb::arg("seed"),
+          nb::arg("stream_ptr"));
+
+    m.def("quantize_int8_rowwise_convrot64", &quantize_int8_rowwise_convrot64,
+          "Fused ConvRot rowwise INT8 quantization using 64-lane FHT groups",
+          nb::arg("input"),
+          nb::arg("output"),
+          nb::arg("scales"),
+          nb::arg("group_size"),
+          nb::arg("stochastic"),
+          nb::arg("seed"),
           nb::arg("stream_ptr"));
 
     m.def("dequantize_int8_linear", &dequantize_int8_linear,
@@ -1051,6 +1507,48 @@ NB_MODULE(_C, m) {
           nb::arg("bias"),
           nb::arg("output"),
           nb::arg("output_dtype_code"),
+          nb::arg("stream_ptr"));
+
+    m.def("int8_gemv_dequant", &int8_gemv_dequant,
+          "INT8 GEMV with fused rowwise x colwise dequantization, bias, and output cast",
+          nb::arg("input"),
+          nb::arg("weight"),
+          nb::arg("x_scales"),
+          nb::arg("weight_scales"),
+          nb::arg("bias"),
+          nb::arg("output"),
+          nb::arg("output_dtype_code"),
+          nb::arg("stream_ptr"));
+
+    m.def("int8_linear_m1", &int8_linear_m1,
+          "M=1 INT8 linear: activation quantization followed by GEMV/dequant",
+          nb::arg("input"),
+          nb::arg("q_scratch"),
+          nb::arg("x_scales"),
+          nb::arg("weight"),
+          nb::arg("weight_scales"),
+          nb::arg("bias"),
+          nb::arg("output"),
+          nb::arg("output_dtype_code"),
+          nb::arg("convrot"),
+          nb::arg("group_size"),
+          nb::arg("stream_ptr"));
+
+    m.def("dequantize_int8_simple", &dequantize_int8_simple,
+          "INT8 dequantization to float32",
+          nb::arg("input"),
+          nb::arg("scale"),
+          nb::arg("output"),
+          nb::arg("inner_dim"),
+          nb::arg("scale_mode"),
+          nb::arg("stream_ptr"));
+
+    m.def("dequantize_int8_convrot_weight", &dequantize_int8_convrot_weight,
+          "INT8 ConvRot weight dequantization to float32",
+          nb::arg("input"),
+          nb::arg("scale"),
+          nb::arg("output"),
+          nb::arg("group_size"),
           nb::arg("stream_ptr"));
 
     m.def("apply_rope", &apply_rope,
