@@ -37,6 +37,51 @@ __forceinline__ __device__ float clamp(float val, float min, float max) {
   return fminf(max, fmaxf(min, val));
 }
 
+//
+__forceinline__ __device__ uint8_t encode_std_e4m3(float val) {
+  constexpr float kMax = 448.0f;
+  val = fminf(fmaxf(val, -kMax), kMax);
+
+  uint8_t sign = (val < 0.0f) ? 0x80 : 0x00;
+  float abs_val = fabsf(val);
+
+  if (abs_val == 0.0f)
+    return 0x00;
+
+  int exp;
+  float sig = frexpf(abs_val, &exp);
+  int exp_bits =
+      exp +
+      6; // bias=7: frexp gives sig*2^exp, we need 2^(exp_bits-7)*(1+mant/8)
+
+  if (exp_bits <= 0) {
+    // Subnormal: 2^-6 * mant/8 = abs_val
+    int mant = (int)roundf(abs_val * 64.0f * 8.0f); // / (2^-6/8) = * 512
+    if (mant > 7)
+      mant = 7;
+    if (mant == 0)
+      return 0x00;
+    return sign | mant;
+  }
+
+  if (exp_bits >= 15) {
+    return sign | (15 << 3) | 6; // max: 0x7E or 0xFE
+  }
+
+  // Normal: abs_val = (1 + mant/8) * 2^(exp_bits - 7)
+  // sig * 2^exp = (1 + mant/8) * 2^(exp_bits - 7)
+  // sig * 2 = 1 + mant/8  →  mant = (sig * 2 - 1) * 8
+  int mant = (int)roundf((sig * 2.0f - 1.0f) * 8.0f + 1e-7f);
+  if (mant == 8) {
+    mant = 0;
+    exp_bits++;
+    if (exp_bits >= 15)
+      return sign | (15 << 3) | 6;
+  }
+
+  return sign | (exp_bits << 3) | mant;
+}
+
 template <typename InputType, typename OutputType>
 __global__ void
 quantize_fp8_tensor_kernel(const InputType *src, OutputType *dst,
@@ -65,7 +110,9 @@ quantize_fp8_tensor_kernel(const InputType *src, OutputType *dst,
     for (int j = 0; j < n_src_load; j++) {
       float scaled_val = static_cast<float>(_src_ptr[j]) / *scale_f;
       scaled_val = clamp(scaled_val, -kFP8Max, kFP8Max);
-      f4_e4m3.f8[i * n_src_load + j] = static_cast<OutputType>(scaled_val);
+      // f4_e4m3.f8[i * n_src_load + j] = static_cast<OutputType>(scaled_val);
+      uint8_t fp8_byte = encode_std_e4m3(scaled_val);
+      reinterpret_cast<uint8_t *>(&f4_e4m3.f8)[i * n_src_load + j] = fp8_byte;
     }
   }
   *reinterpret_cast<float4 *>(dst + idx) = f4_e4m3.f4;
@@ -171,18 +218,37 @@ __global__ void stochastic_round_fp8_kernel(uint8_t *rng_and_dst,
       (abs_value / exponent_scale - 1.0f) * kMantissaLevels;
   const float subnormal_mantissa = abs_value / subnormal_mantissa_scale;
   const float random = static_cast<float>(rng_and_dst[idx]) * (1.0f / 256.0f);
-  const float mantissa =
-      floorf((normal ? normal_mantissa : subnormal_mantissa) + random) /
-      kMantissaLevels;
+  const float mantissa_float =
+      floorf((normal ? normal_mantissa : subnormal_mantissa) + random);
+  const int mantissa_int = (int)mantissa_float;
+  const float mantissa = mantissa_float / kMantissaLevels;
   const float rounded = sign * (normal ? exponent_scale * (1.0f + mantissa)
                                        : subnormal_value_scale * mantissa);
+  // union {
+  //   OutputType fp8;
+  //   uint8_t u8;
+  // } out;
+  // out.fp8 = static_cast<OutputType>(clamp(rounded, -kFP8Max, kFP8Max));
+  // rng_and_dst[idx] = out.u8;
+  float clamped = clamp(rounded, -kFP8Max, kFP8Max);
+  uint8_t sign_bit = (clamped < 0.0f) ? 0x80 : 0x00;
 
-  union {
-    OutputType fp8;
-    uint8_t u8;
-  } out;
-  out.fp8 = static_cast<OutputType>(clamp(rounded, -kFP8Max, kFP8Max));
-  rng_and_dst[idx] = out.u8;
+  if (fabsf(clamped) == 0.0f) {
+    rng_and_dst[idx] = 0x00;
+  } else {
+    int exp_bits = (int)exponent;
+    int mant_bits = mantissa_int;
+
+    // Handle mantissa carry (when random pushes mantissa to kMantissaLevels)
+    if (mant_bits >= (int)kMantissaLevels) {
+      mant_bits = 0;
+      exp_bits++;
+    }
+
+    if (exp_bits > 15)
+      exp_bits = 15;
+    rng_and_dst[idx] = sign_bit | ((exp_bits & 0x0F) << 3) | (mant_bits & 0x07);
+  }
 }
 
 } // anonymous namespace
