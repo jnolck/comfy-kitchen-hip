@@ -26,7 +26,7 @@ __all__ = [
     "apply_rope1",
     "apply_rope_split_half",
     "apply_rope_split_half1",
-    # "dequantize_nvfp4",
+    "dequantize_nvfp4",
     "dequantize_per_tensor_fp8",
     "dequantize_int8_simple",
     "dequantize_int8_simple_dtype",
@@ -40,7 +40,7 @@ __all__ = [
     "quantize_and_rotate_rowwise",
     # "gemv_awq_w4a16",
     # "quantize_mxfp8",
-    # "quantize_nvfp4",
+    "quantize_nvfp4",
     "quantize_per_tensor_fp8",
     # "quantize_svdquant_w4a4",
     # "scaled_mm_nvfp4",
@@ -385,92 +385,97 @@ def stochastic_rounding_fp8(
     return rng.view(output_type)
 
 
-# def quantize_nvfp4(
-#     x: torch.Tensor,
-#     per_tensor_scale: torch.Tensor,
-#     epsilon: float = 0.0,
-#     pad_16x: bool = False,
-#     hi_first: bool = True,
-# ) -> tuple[torch.Tensor, torch.Tensor]:
-#     # CUDA backend: uses cuBLAS tiled layout for block scales
-#     assert x.is_contiguous(), "Input tensor must be contiguous"
-#
-#     orig_rows, orig_cols = x.shape
-#     if pad_16x:
-#         num_rows = roundup(orig_rows, 16)
-#         num_cols = roundup(orig_cols, 16)
-#     else:
-#         num_rows, num_cols = orig_rows, orig_cols
-#         assert num_rows % 16 == 0, f"num_rows must be divisible by 16, got {num_rows}"
-#         assert num_cols % 16 == 0, f"num_cols must be divisible by 16, got {num_cols}"
-#
-#     # Allocate output tensors
-#     # FP4: 2 values per uint8, so output is half the column size
-#     qx = torch.empty((num_rows, num_cols // 2), device=x.device, dtype=torch.uint8, memory_format=torch.contiguous_format)
-#
-#     # Block scales: cuBLAS tiled layout
-#     # One scale per 16-element block, with tiling pattern
-#     # Allocate as uint8 for DLPack compatibility (nanobind doesn't handle float8 well)
-#     # Initialize to zero to avoid garbage in padded regions
-#     scale_rows = roundup(num_rows, 128)
-#     scale_cols = roundup(num_cols // 16, 4)
-#     sx_uint8 = torch.zeros((scale_rows, scale_cols), device=x.device, dtype=torch.uint8)
-#
-#     # Reshape scalar to 1D for nanobind compatibility
-#     if per_tensor_scale.dim() == 0:
-#         per_tensor_scale = per_tensor_scale.reshape(1)
-#
-#     stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
-#     _C.quantize_nvfp4(
-#         _wrap_for_dlpack(x),
-#         _wrap_for_dlpack(per_tensor_scale),
-#         _wrap_for_dlpack(qx),
-#         _wrap_for_dlpack(sx_uint8),
-#         epsilon,
-#         pad_16x,
-#         hi_first,
-#         stream_ptr,
-#     )
-#
-#     # View uint8 scales as float8_e4m3fn before returning
-#     sx = sx_uint8.view(torch.float8_e4m3fn)
-#
-#     return qx, sx
-#
-#
-# def dequantize_nvfp4(
-#     qx: torch.Tensor,
-#     per_tensor_scale: torch.Tensor,
-#     block_scales: torch.Tensor,
-#     output_type: torch.dtype = torch.bfloat16,
-#     hi_first: bool = True,
-# ) -> torch.Tensor:
-#     assert qx.is_contiguous(), "Input tensor must be contiguous"
-#
-#     num_rows, num_cols_packed = qx.shape
-#     num_cols = num_cols_packed * 2  # Each uint8 contains 2 FP4 values
-#
-#     output = torch.empty((num_rows, num_cols), device=qx.device, dtype=output_type)
-#
-#     # Reshape scalar to 1D for nanobind compatibility
-#     if per_tensor_scale.dim() == 0:
-#         per_tensor_scale = per_tensor_scale.reshape(1)
-#
-#     block_scales_uint8 = block_scales.view(torch.uint8)
-#     output_dtype_code = DTYPE_TO_CODE[output_type]
-#     stream_ptr = torch.cuda.current_stream(qx.device).cuda_stream
-#
-#     _C.dequantize_nvfp4(
-#         _wrap_for_dlpack(qx),
-#         _wrap_for_dlpack(per_tensor_scale),
-#         _wrap_for_dlpack(block_scales_uint8),
-#         _wrap_for_dlpack(output),
-#         output_dtype_code,
-#         hi_first,
-#         stream_ptr,
-#     )
-#
-#     return output
+def quantize_nvfp4(
+    x: torch.Tensor,
+    per_tensor_scale: torch.Tensor,
+    epsilon: float = 0.0,
+    pad_16x: bool = False,
+    hi_first: bool = True,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # CUDA backend: uses cuBLAS tiled layout for block scales
+    assert x.is_contiguous(), "Input tensor must be contiguous"
+
+    orig_rows, orig_cols = x.shape
+    if pad_16x:
+        num_rows = roundup(orig_rows, 16)
+        num_cols = roundup(orig_cols, 16)
+    else:
+        num_rows, num_cols = orig_rows, orig_cols
+        assert num_rows % 16 == 0, f"num_rows must be divisible by 16, got {num_rows}"
+        assert num_cols % 16 == 0, f"num_cols must be divisible by 16, got {num_cols}"
+
+    # Allocate output tensors
+    # FP4: 2 values per uint8, so output is half the column size
+    qx = torch.empty(
+        (num_rows, num_cols // 2),
+        device=x.device,
+        dtype=torch.uint8,
+        memory_format=torch.contiguous_format,
+    )
+
+    # Block scales: cuBLAS tiled layout
+    # One scale per 16-element block, with tiling pattern
+    # Allocate as uint8 for DLPack compatibility (nanobind doesn't handle float8 well)
+    # Initialize to zero to avoid garbage in padded regions
+    scale_rows = roundup(num_rows, 128)
+    scale_cols = roundup(num_cols // 16, 4)
+    sx_uint8 = torch.zeros((scale_rows, scale_cols), device=x.device, dtype=torch.uint8)
+
+    # Reshape scalar to 1D for nanobind compatibility
+    if per_tensor_scale.dim() == 0:
+        per_tensor_scale = per_tensor_scale.reshape(1)
+
+    stream_ptr = torch.cuda.current_stream(x.device).cuda_stream
+    _C.quantize_nvfp4(
+        _wrap_for_dlpack(x),
+        _wrap_for_dlpack(per_tensor_scale),
+        _wrap_for_dlpack(qx),
+        _wrap_for_dlpack(sx_uint8),
+        epsilon,
+        pad_16x,
+        hi_first,
+        stream_ptr,
+    )
+
+    # View uint8 scales as float8_e4m3fn before returning
+    sx = sx_uint8.view(torch.float8_e4m3fn)
+
+    return qx, sx
+
+
+def dequantize_nvfp4(
+    qx: torch.Tensor,
+    per_tensor_scale: torch.Tensor,
+    block_scales: torch.Tensor,
+    output_type: torch.dtype = torch.bfloat16,
+    hi_first: bool = True,
+) -> torch.Tensor:
+    assert qx.is_contiguous(), "Input tensor must be contiguous"
+
+    num_rows, num_cols_packed = qx.shape
+    num_cols = num_cols_packed * 2  # Each uint8 contains 2 FP4 values
+
+    output = torch.empty((num_rows, num_cols), device=qx.device, dtype=output_type)
+
+    # Reshape scalar to 1D for nanobind compatibility
+    if per_tensor_scale.dim() == 0:
+        per_tensor_scale = per_tensor_scale.reshape(1)
+
+    block_scales_uint8 = block_scales.view(torch.uint8)
+    output_dtype_code = DTYPE_TO_CODE[output_type]
+    stream_ptr = torch.cuda.current_stream(qx.device).cuda_stream
+
+    _C.dequantize_nvfp4(
+        _wrap_for_dlpack(qx),
+        _wrap_for_dlpack(per_tensor_scale),
+        _wrap_for_dlpack(block_scales_uint8),
+        _wrap_for_dlpack(output),
+        output_dtype_code,
+        hi_first,
+        stream_ptr,
+    )
+
+    return output
 
 
 def quantize_int8_rowwise(
@@ -1626,18 +1631,18 @@ def _build_constraints() -> dict:
             },
             default_devices=cuda_devices,
         ),
-        # "quantize_nvfp4": FunctionConstraints(
-        #     params={
-        #         "x": ParamConstraint(
-        #             dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
-        #             shape_rules=(ExactDims(2),),
-        #         ),
-        #         "per_tensor_scale": ParamConstraint(
-        #             dtypes=frozenset({torch.float32}),
-        #         ),
-        #     },
-        #     default_devices=cuda_devices,
-        # ),
+        "quantize_nvfp4": FunctionConstraints(
+            params={
+                "x": ParamConstraint(
+                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+                    shape_rules=(ExactDims(2),),
+                ),
+                "per_tensor_scale": ParamConstraint(
+                    dtypes=frozenset({torch.float32}),
+                ),
+            },
+            default_devices=cuda_devices,
+        ),
         # "quantize_mxfp8": FunctionConstraints(
         #     params={
         #         "x": ParamConstraint(
@@ -1647,24 +1652,24 @@ def _build_constraints() -> dict:
         #     },
         #     default_devices=cuda_devices,
         # ),
-        # "dequantize_nvfp4": FunctionConstraints(
-        #     params={
-        #         "qx": ParamConstraint(
-        #             dtypes=frozenset({torch.uint8}),
-        #             shape_rules=(ExactDims(2), DivisibleBy(dim=0, factor=16)),
-        #         ),
-        #         "per_tensor_scale": ParamConstraint(
-        #             dtypes=frozenset({torch.float32}),
-        #         ),
-        #         "block_scales": ParamConstraint(
-        #             dtypes=frozenset({torch.float8_e4m3fn}),
-        #         ),
-        #         "output_type": ParamConstraint(
-        #             dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
-        #         ),
-        #     },
-        #     default_devices=cuda_devices,
-        # ),
+        "dequantize_nvfp4": FunctionConstraints(
+            params={
+                "qx": ParamConstraint(
+                    dtypes=frozenset({torch.uint8}),
+                    shape_rules=(ExactDims(2), DivisibleBy(dim=0, factor=16)),
+                ),
+                "per_tensor_scale": ParamConstraint(
+                    dtypes=frozenset({torch.float32}),
+                ),
+                "block_scales": ParamConstraint(
+                    dtypes=frozenset({torch.float8_e4m3fn}),
+                ),
+                "output_type": ParamConstraint(
+                    dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16}),
+                ),
+            },
+            default_devices=cuda_devices,
+        ),
         "apply_rope1": FunctionConstraints(
             params={
                 "x": ParamConstraint(
