@@ -1,3 +1,5 @@
+Run with COMFY_KITCHEN_DISABLE_CUTLASS=1 the CK kernel is fubar. 
+
 # Comfy Kitchen
 
 Fast kernel library for Diffusion inference with multiple compute backends.
