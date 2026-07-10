@@ -1024,6 +1024,17 @@ def convrot_w4a4_linear(
         else:
             h = _build_hadamard(convrot_groupsize, device=x2d.device, dtype=x2d.dtype)
             qact_int8, x_scale = quantize_and_rotate_rowwise(x2d, h, convrot_groupsize)
+        if _cuda_device_is_turing(qact_int8.get_device()):
+            qweight_int8 = prepare_int4_weight_for_int8_linear(qweight.contiguous())
+            out = _int4_linear_via_int8_values(
+                qact_int8,
+                qweight_int8,
+                x_scale,
+                wscales,
+                bias,
+                x.dtype,
+            )
+            return out.reshape(*orig_shape[:-1], qweight.shape[0])
         if qact_int8.shape[0] <= _INT4_PACKED_WEIGHT_SMALL_M_MAX and hasattr(_C, "int4_weight_int8_act_gemv_dequant"):
             out = _int4_weight_int8_act_gemv_dequant(
                 qact_int8,
@@ -2409,7 +2420,7 @@ def _build_constraints() -> dict:
                 "stochastic_rounding": ParamConstraint(dtypes=frozenset({int})),
             },
             default_devices=cuda_devices,
-            min_compute_capability=(8, 0),
+            min_compute_capability=(7, 5),
         ),
         "dequantize_convrot_w4a4_weight": FunctionConstraints(
             params={
@@ -2426,7 +2437,7 @@ def _build_constraints() -> dict:
                 "output_dtype": ParamConstraint(dtypes=frozenset({torch.float32, torch.float16, torch.bfloat16})),
             },
             default_devices=cuda_devices,
-            min_compute_capability=(8, 0),
+            min_compute_capability=(7, 5),
         ),
         "convrot_w4a4_linear": FunctionConstraints(
             params={
@@ -2448,7 +2459,7 @@ def _build_constraints() -> dict:
                 "linear_dtype": ParamConstraint(dtypes=frozenset({str})),
             },
             default_devices=cuda_devices,
-            min_compute_capability=(8, 0),
+            min_compute_capability=(7, 5),
         ),
         "prepare_int4_weight_for_int8_linear": FunctionConstraints(
             params={
