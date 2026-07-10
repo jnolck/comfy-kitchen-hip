@@ -44,6 +44,14 @@ __forceinline__ __device__ void unpack_int4_pair(int8_t packed, int& lo, int& hi
         hi = (hi4 >= 8) ? hi4 - 16 : hi4;
 }
 
+__forceinline__ __device__ int8_t unpack_int4_to_int8(int8_t packed, int idx)
+{
+        uint8_t u = static_cast<uint8_t>(packed);
+        int val = (idx == 0) ? (u & 0x0F) : ((u >> 4) & 0x0F);
+        if (val >= 8) val -= 16;
+        return static_cast<int8_t>(val);
+}
+
 // ---------------------------------------------------------------------------
 // Warp-level reductions. Uses full-warp mask 0xffffffff.
 // ---------------------------------------------------------------------------

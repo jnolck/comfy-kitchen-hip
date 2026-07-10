@@ -10,6 +10,7 @@
 #include <cfloat>
 #include <cstdint>
 #include <limits>
+#include <rocwmma/rocwmma.hpp>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -22,11 +23,11 @@ extern "C" void launch_cublas_gemm_int8_kernel(const void* A_ptr, const void* B_
                                                int64_t M, int64_t N, int64_t K, void* workspace_ptr,
                                                int64_t workspace_size, hipStream_t stream);
 
-extern "C" bool launch_cutlass_int8_dequant_strided(const void* A, const void* B, const void* xs,
-                                                    const void* ws, const void* bias, void* D,
-                                                    int64_t M, int64_t N, int64_t K,
-                                                    int64_t output_stride, int out_dtype_code,
-                                                    hipStream_t stream);
+// extern "C" bool launch_cutlass_int8_dequant_strided(const void* A, const void* B, const void* xs,
+//                                                     const void* ws, const void* bias, void* D,
+//                                                     int64_t M, int64_t N, int64_t K,
+//                                                     int64_t output_stride, int out_dtype_code,
+//                                                     hipStream_t stream);
 
 namespace
 {
@@ -38,6 +39,7 @@ using comfy::svdquant::kGroupSize;
 using comfy::svdquant::kInt4Max;
 using comfy::svdquant::mma_m16n8k64_s4s4s32;
 using comfy::svdquant::pack_int4_pair;
+using comfy::svdquant::unpack_int4_to_int8;
 
 constexpr int kThreadsPerWarp = 32;
 constexpr int kConvRotGroup = 256;
@@ -1258,20 +1260,8 @@ __global__ void dequantize_int4_convrot64_warp32_kernel(const int8_t* __restrict
         }
 }
 
-constexpr int kStages = 3;
-constexpr int kMUnroll = 1;
-constexpr int kWarpM = kMUnroll * 16;
-constexpr int kNUnroll = 8;
-constexpr int kWarpN = kNUnroll * 8;
 constexpr int kWarpsM = 2;
 constexpr int kWarpsN = 4;
-constexpr int kNumWarps = kWarpsM * kWarpsN;
-constexpr int kBlockM = kWarpM * kWarpsM;
-constexpr int kBlockN = kWarpN * kWarpsN;
-constexpr int kBlockKBytes = kGroupSize / 2;
-constexpr int kThreadsPerBlock = kNumWarps * 32;
-constexpr int kBLoadChunks = kBlockN * 2;
-constexpr int kBLoadSweeps = (kBLoadChunks + kThreadsPerBlock - 1) / kThreadsPerBlock;
 
 template <typename OutType, typename BiasType>
 __global__ void int4_linear_kernel(const int8_t* __restrict__ act,
@@ -1281,213 +1271,141 @@ __global__ void int4_linear_kernel(const int8_t* __restrict__ act,
                                    const BiasType* __restrict__ bias, OutType* __restrict__ out,
                                    int M, int N, int K, bool has_bias)
 {
+        // AMD-optimized tile dimensions
+        constexpr int kBlockM = 32;
+        constexpr int kBlockN = 128;
+        constexpr int kBlockKInt8 = kGroupSize;  // 64 int8 per row (unpacked from 32 bytes int4)
+        constexpr int kBlockKBytes = kGroupSize / 2;
+        constexpr int kWarpM = 16;
+        constexpr int kNUnroll = 2;
+        constexpr int kWarpN = kNUnroll * 16;
+        constexpr int kWarpsN = 4;
+        constexpr int kNumWarps = 8;
+        constexpr int kThreadsPerBlock = kNumWarps * 32;
+
         const int cta_m = blockIdx.y * kBlockM;
         const int cta_n = blockIdx.x * kBlockN;
         const int warp_id = threadIdx.x >> 5;
-        const int lane = threadIdx.x & 31;
         const int warp_m = warp_id & (kWarpsM - 1);
         const int warp_n = warp_id / kWarpsM;
-        const int groupID = lane >> 2;
-        const int tid_in_group = lane & 3;
-        const int warp_m_base = cta_m + warp_m * kWarpM;
-        const int warp_n_base = cta_n + warp_n * kWarpN;
-
-        int32_t accum[kMUnroll][kNUnroll][4];
-#pragma unroll
-        for (int mi = 0; mi < kMUnroll; ++mi)
-        {
-#pragma unroll
-                for (int c = 0; c < kNUnroll; ++c)
-                {
-#pragma unroll
-                        for (int i = 0; i < 4; ++i)
-                        {
-                                accum[mi][c][i] = 0;
-                        }
-                }
-        }
-
         const int K_half = K / 2;
         const int num_groups = K / kGroupSize;
 
-        __shared__ alignas(16) int8_t smem_B[kStages][kBlockN * kBlockKBytes];
-        __shared__ alignas(16) int8_t smem_A[kStages][kBlockM * kBlockKBytes];
+        // Shared memory - unpacked int8
+        __shared__ alignas(16) int8_t smem_A[kBlockM * kBlockKInt8];
+        __shared__ alignas(16) int8_t smem_B[kBlockN * kBlockKInt8];
+        __shared__ alignas(16) int32_t smem_acc[kBlockM * kBlockN];
+        __shared__ alignas(16) float acc_fp32[kBlockM * kBlockN];
 
-        auto issue_B_load = [&](int g, int stage)
-        {
-                if (g >= num_groups) return;
-                const int thread_idx = threadIdx.x;
-#pragma unroll
-                for (int sweep = 0; sweep < kBLoadSweeps; ++sweep)
-                {
-                        const int t = thread_idx + sweep * kThreadsPerBlock;
-                        if (t < kBlockN * 2)
-                        {
-                                const int n_row = t >> 1;
-                                const int half = t & 1;
-                                const int n_global = cta_n + n_row;
-                                int8_t* dst = &smem_B[stage][n_row * kBlockKBytes + half * 16];
-                                if (n_global < N)
-                                {
-                                        const int8_t* src = weight + n_global * K_half +
-                                                            g * kBlockKBytes + half * 16;
-                                        cp_async_16b(dst, src);
-                                }
-                                else
-                                {
-                                        reinterpret_cast<uint4*>(dst)[0] = {0, 0, 0, 0};
-                                }
-                        }
-                }
-        };
+        // Initialize accumulator
+        for (int i = threadIdx.x; i < kBlockM * kBlockN; i += kThreadsPerBlock)
+                acc_fp32[i] = 0.f;
+        __syncthreads();
 
-        auto issue_A_load = [&](int g, int stage)
+        for (int g = 0; g < num_groups; g++)
         {
-                if (g >= num_groups) return;
-                const int t = threadIdx.x;
-                if (t < kBlockM * 2)
+                // Load A tile: unpack int4→int8 into shared memory
+                const int base_byte = g * kBlockKBytes;
+                for (int t = threadIdx.x; t < kBlockM * kBlockKInt8; t += kThreadsPerBlock)
                 {
-                        const int m_row = t >> 1;
-                        const int half = t & 1;
-                        const int m_global = cta_m + m_row;
-                        int8_t* dst = &smem_A[stage][m_row * kBlockKBytes + half * 16];
+                        int m_row = t / kBlockKInt8;
+                        int k_col = t % kBlockKInt8;
+                        int m_global = cta_m + m_row;
+                        int8_t val = 0;
                         if (m_global < M)
                         {
-                                const int8_t* src =
-                                    act + m_global * K_half + g * kBlockKBytes + half * 16;
-                                cp_async_16b(dst, src);
+                                int byte_idx = base_byte + k_col / 2;
+                                int nibble = k_col & 1;
+                                int8_t packed = act[m_global * K_half + byte_idx];
+                                val = unpack_int4_to_int8(packed, nibble);
                         }
-                        else
+                        smem_A[t] = val;
+                }
+
+                // Load B tile: unpack int4→int8
+                for (int t = threadIdx.x; t < kBlockN * kBlockKInt8; t += kThreadsPerBlock)
+                {
+                        int n_row = t / kBlockKInt8;
+                        int k_col = t % kBlockKInt8;
+                        int n_global = cta_n + n_row;
+                        int8_t val = 0;
+                        if (n_global < N)
                         {
-                                reinterpret_cast<uint4*>(dst)[0] = {0, 0, 0, 0};
+                                int byte_idx = base_byte + k_col / 2;
+                                int nibble = k_col & 1;
+                                int8_t packed = weight[n_global * K_half + byte_idx];
+                                val = unpack_int4_to_int8(packed, nibble);
                         }
+                        smem_B[t] = val;
                 }
-        };
-
-        auto load_B_fragment = [&](int stage, int c, uint32_t (&b_reg)[2])
-        {
-                const int b_col_local = (warp_n * kWarpN) + c * 8 + groupID;
-                const int b_col_global = cta_n + b_col_local;
-                b_reg[0] = b_reg[1] = 0;
-                if (b_col_local < kBlockN && b_col_global < N)
-                {
-                        const int byte0 = tid_in_group * 8;
-                        const int8_t* row_base = &smem_B[stage][b_col_local * kBlockKBytes];
-                        b_reg[0] = *reinterpret_cast<const uint32_t*>(row_base + byte0);
-                        b_reg[1] = *reinterpret_cast<const uint32_t*>(row_base + byte0 + 4);
-                }
-        };
-
-#pragma unroll
-        for (int s = 0; s < kStages - 1; ++s)
-        {
-                issue_A_load(s, s);
-                issue_B_load(s, s);
-                cp_async_commit_group();
-        }
-
-        for (int g = 0; g < num_groups; ++g)
-        {
-                const int next_g = g + kStages - 1;
-                if (next_g < num_groups)
-                {
-                        const int next_stage = (g + kStages - 1) % kStages;
-                        issue_A_load(next_g, next_stage);
-                        issue_B_load(next_g, next_stage);
-                }
-                cp_async_commit_group();
-                cp_async_wait_group<kStages - 1>();
                 __syncthreads();
 
-                const int cur_stage = g % kStages;
-                uint32_t a_reg[kMUnroll][4];
+                // WMMA: 16×16×16 int8, 4 K-slices, 2 N-tiles per warp
+                using A_frag =
+                    rocwmma::fragment<rocwmma::matrix_a, 16, 16, 16, int8_t, rocwmma::row_major>;
+                using B_frag =
+                    rocwmma::fragment<rocwmma::matrix_b, 16, 16, 16, int8_t, rocwmma::col_major>;
+                using AccI32 = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, int32_t>;
+
+                AccI32 acc_i32[kNUnroll];
 #pragma unroll
-                for (int mi = 0; mi < kMUnroll; ++mi)
+                for (int c = 0; c < kNUnroll; c++)
+#pragma unroll
+                        for (int i = 0; i < 8; i++)
+                                acc_i32[c].x[i] = 0;
+
+#pragma unroll
+                for (int ks = 0; ks < 4; ks++)
                 {
-                        const int m_tile_base = warp_m_base + mi * 16;
-                        const int row0_m = m_tile_base + groupID;
-                        const int row1_m = m_tile_base + groupID + 8;
-                        const int row0_local = warp_m * kWarpM + mi * 16 + groupID;
-                        const int row1_local = warp_m * kWarpM + mi * 16 + groupID + 8;
-                        a_reg[mi][0] = a_reg[mi][1] = a_reg[mi][2] = a_reg[mi][3] = 0;
-                        if (row0_m < M)
+                        A_frag a_frag;
+                        rocwmma::load_matrix_sync(
+                            a_frag, &smem_A[warp_m * kWarpM * kBlockKInt8 + ks * 16], kBlockKInt8);
+
+#pragma unroll
+                        for (int c = 0; c < kNUnroll; c++)
                         {
-                                const int8_t* rb = &smem_A[cur_stage][row0_local * kBlockKBytes];
-                                a_reg[mi][0] =
-                                    *reinterpret_cast<const uint32_t*>(rb + tid_in_group * 8);
-                                a_reg[mi][2] =
-                                    *reinterpret_cast<const uint32_t*>(rb + tid_in_group * 8 + 4);
-                        }
-                        if (row1_m < M)
-                        {
-                                const int8_t* rb = &smem_A[cur_stage][row1_local * kBlockKBytes];
-                                a_reg[mi][1] =
-                                    *reinterpret_cast<const uint32_t*>(rb + tid_in_group * 8);
-                                a_reg[mi][3] =
-                                    *reinterpret_cast<const uint32_t*>(rb + tid_in_group * 8 + 4);
+                                B_frag b_frag;
+                                rocwmma::load_matrix_sync(
+                                    b_frag,
+                                    &smem_B[(warp_n * kWarpN + c * 16) * kBlockKInt8 + ks * 16],
+                                    kBlockKInt8);
+                                rocwmma::mma_sync(acc_i32[c], a_frag, b_frag, acc_i32[c]);
                         }
                 }
 
+// Store int32 to shared memory
 #pragma unroll
-                for (int c = 0; c < kNUnroll; ++c)
+                for (int c = 0; c < kNUnroll; c++)
+                        rocwmma::store_matrix_sync(
+                            &smem_acc[warp_m * kWarpM * kBlockN + warp_n * kWarpN + c * 16],
+                            acc_i32[c], kBlockN, rocwmma::mem_row_major);
+                __syncthreads();
+
+                // Dequant: flat read, multiply by scales
+                for (int i = threadIdx.x; i < kBlockM * kBlockN; i += kThreadsPerBlock)
                 {
-                        uint32_t b_reg[2];
-                        load_B_fragment(cur_stage, c, b_reg);
-#pragma unroll
-                        for (int mi = 0; mi < kMUnroll; ++mi)
+                        int row_global = cta_m + i / kBlockN;
+                        int col_global = cta_n + i % kBlockN;
+                        if (row_global < M && col_global < N)
                         {
-                                int32_t zero[4] = {0, 0, 0, 0};
-                                int32_t d[4];
-                                mma_m16n8k64_s4s4s32(a_reg[mi], b_reg, zero, d);
-                                accum[mi][c][0] += d[0];
-                                accum[mi][c][1] += d[1];
-                                accum[mi][c][2] += d[2];
-                                accum[mi][c][3] += d[3];
+                                int32_t v = smem_acc[i];
+                                acc_fp32[i] +=
+                                    (float)v * x_scales[row_global] * weight_scales[col_global];
                         }
                 }
+                __syncthreads();
         }
-        cp_async_wait_group<0>();
 
-#pragma unroll
-        for (int mi = 0; mi < kMUnroll; ++mi)
+        // Write output
+        for (int i = threadIdx.x; i < kBlockM * kBlockN; i += kThreadsPerBlock)
         {
-                const int m_tile_base = warp_m_base + mi * 16;
-                const int row0_m = m_tile_base + groupID;
-                const int row1_m = m_tile_base + groupID + 8;
-#pragma unroll
-                for (int c = 0; c < kNUnroll; ++c)
+                int row_global = cta_m + i / kBlockN;
+                int col_global = cta_n + i % kBlockN;
+                if (row_global < M && col_global < N)
                 {
-                        const int n_chunk_base = warp_n_base + c * 8;
-                        const int col0 = n_chunk_base + tid_in_group * 2 + 0;
-                        const int col1 = n_chunk_base + tid_in_group * 2 + 1;
-                        if (row0_m < M && col0 < N)
-                        {
-                                float v = static_cast<float>(accum[mi][c][0]) * x_scales[row0_m] *
-                                          weight_scales[col0];
-                                if (has_bias) v += to_float(bias[col0]);
-                                out[row0_m * N + col0] = from_float<OutType>(v);
-                        }
-                        if (row0_m < M && col1 < N)
-                        {
-                                float v = static_cast<float>(accum[mi][c][1]) * x_scales[row0_m] *
-                                          weight_scales[col1];
-                                if (has_bias) v += to_float(bias[col1]);
-                                out[row0_m * N + col1] = from_float<OutType>(v);
-                        }
-                        if (row1_m < M && col0 < N)
-                        {
-                                float v = static_cast<float>(accum[mi][c][2]) * x_scales[row1_m] *
-                                          weight_scales[col0];
-                                if (has_bias) v += to_float(bias[col0]);
-                                out[row1_m * N + col0] = from_float<OutType>(v);
-                        }
-                        if (row1_m < M && col1 < N)
-                        {
-                                float v = static_cast<float>(accum[mi][c][3]) * x_scales[row1_m] *
-                                          weight_scales[col1];
-                                if (has_bias) v += to_float(bias[col1]);
-                                out[row1_m * N + col1] = from_float<OutType>(v);
-                        }
+                        float val = acc_fp32[i];
+                        if (has_bias) val += to_float(bias[col_global]);
+                        out[row_global * N + col_global] = from_float<OutType>(val);
                 }
         }
 }
@@ -2992,6 +2910,55 @@ extern "C"
                 }
         }
 
+        //         void launch_int4_linear_kernel(const void* act, const void* weight, const void*
+        //         x_scales,
+        //                                        const void* weight_scales, const void* bias, void*
+        //                                        output, int64_t M, int64_t N, int64_t K, bool
+        //                                        has_bias, int output_dtype_code, int
+        //                                        bias_dtype_code, hipStream_t stream)
+        //         {
+        //                 if (K % comfy::svdquant::kGroupSize != 0) return;
+        //                 const dim3 grid(static_cast<unsigned int>((N + kBlockN - 1) / kBlockN),
+        //                                 static_cast<unsigned int>((M + kBlockM - 1) / kBlockM));
+        //                 const dim3 block(kThreadsPerBlock);
+        //
+        // #define DISPATCH_OUT_BIAS(OutType, BiasType) \
+        //         int4_linear_kernel<OutType, BiasType><<<grid, block, 0, stream>>>( \
+        //             reinterpret_cast<const int8_t*>(act), reinterpret_cast<const
+        //             int8_t*>(weight), \
+        //             reinterpret_cast<const float*>(x_scales), \
+        //             reinterpret_cast<const float*>(weight_scales), \
+        //             reinterpret_cast<const BiasType*>(bias), reinterpret_cast<OutType*>(output),
+        //             \ static_cast<int>(M), static_cast<int>(N), static_cast<int>(K), has_bias)
+        //
+        // #define DISPATCH_BIAS(OutType)                                      \
+        //         do                                                          \
+        //         {                                                           \
+        //                 if (bias_dtype_code == 2)                           \
+        //                         DISPATCH_OUT_BIAS(OutType, __hip_bfloat16); \
+        //                 else if (bias_dtype_code == 1)                      \
+        //                         DISPATCH_OUT_BIAS(OutType, __half);         \
+        //                 else                                                \
+        //                         DISPATCH_OUT_BIAS(OutType, float);          \
+        //         } while (0)
+        //
+        //                 if (output_dtype_code == 2)
+        //                 {
+        //                         DISPATCH_BIAS(__hip_bfloat16);
+        //                 }
+        //                 else if (output_dtype_code == 1)
+        //                 {
+        //                         DISPATCH_BIAS(__half);
+        //                 }
+        //                 else
+        //                 {
+        //                         DISPATCH_BIAS(float);
+        //                 }
+        //
+        // #undef DISPATCH_BIAS
+        // #undef DISPATCH_OUT_BIAS
+        //         }
+
         void launch_int4_linear_kernel(const void* act, const void* weight, const void* x_scales,
                                        const void* weight_scales, const void* bias, void* output,
                                        int64_t M, int64_t N, int64_t K, bool has_bias,
@@ -2999,9 +2966,14 @@ extern "C"
                                        hipStream_t stream)
         {
                 if (K % comfy::svdquant::kGroupSize != 0) return;
+
+                constexpr int kBlockM = 32;
+                constexpr int kBlockN = 128;
+                constexpr int kNumWarps = 8;
+
                 const dim3 grid(static_cast<unsigned int>((N + kBlockN - 1) / kBlockN),
                                 static_cast<unsigned int>((M + kBlockM - 1) / kBlockM));
-                const dim3 block(kThreadsPerBlock);
+                const dim3 block(kNumWarps * 32);
 
 #define DISPATCH_OUT_BIAS(OutType, BiasType)                                               \
         int4_linear_kernel<OutType, BiasType><<<grid, block, 0, stream>>>(                 \
@@ -3038,7 +3010,6 @@ extern "C"
 #undef DISPATCH_BIAS
 #undef DISPATCH_OUT_BIAS
         }
-
         void launch_unpack_int4_to_int8_kernel(const void* input, void* output, int64_t rows,
                                                int64_t K_half, hipStream_t stream)
         {
@@ -3188,18 +3159,18 @@ extern "C"
                                                      : nullptr;
                         void* chunk_output = static_cast<char*>(output) +
                                              n0 * fp_dtype_size_bytes(output_dtype_code);
-                        const bool used_cutlass =
-                            (num_rows >= 1024 &&
-                             (cols >= 4096 || (num_cols == 2560 && cols == 2560)) &&
-                             weight_scale_size != 1 && (!has_bias || bias_dtype_code == 0) &&
-                             launch_cutlass_int8_dequant_strided(
-                                 input, weight_workspace, x_scales, chunk_weight_scales, chunk_bias,
-                                 chunk_output, num_rows, cols, K, num_cols, output_dtype_code,
-                                 stream));
-                        if (used_cutlass)
-                        {
-                                continue;
-                        }
+                        // const bool used_cutlass =
+                        //     (num_rows >= 1024 &&
+                        //      (cols >= 4096 || (num_cols == 2560 && cols == 2560)) &&
+                        //      weight_scale_size != 1 && (!has_bias || bias_dtype_code == 0) &&
+                        //      launch_cutlass_int8_dequant_strided(
+                        //          input, weight_workspace, x_scales, chunk_weight_scales,
+                        //          chunk_bias, chunk_output, num_rows, cols, K, num_cols,
+                        //          output_dtype_code, stream));
+                        // if (used_cutlass)
+                        // {
+                        //         continue;
+                        // }
 
                         launch_cublas_gemm_int8_kernel(input, weight_workspace, acc_workspace,
                                                        num_rows, cols, K, cublas_workspace,
