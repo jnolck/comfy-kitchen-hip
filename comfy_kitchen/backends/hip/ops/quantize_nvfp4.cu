@@ -219,6 +219,25 @@ __global__ void quantize_nvfp4_kernel(const IType* const input,
                                             vals_encoded[2], vals_encoded[3]);
         }
 }
+// Add before the dequant kernel:
+__forceinline__ __device__ float decode_std_e4m3_scale(uint8_t byte_val)
+{
+        int sign = (byte_val >> 7) & 1;
+        int exp = (byte_val >> 3) & 0x0F;
+        int mant = byte_val & 0x07;
+
+        float val;
+        if (exp == 0)
+        {
+                val = (mant / 8.0f) * 0.015625f;  // 2^-6
+        }
+        else
+        {
+                val = (1.0f + mant / 8.0f) * exp2f((float)(exp - 7));  // bias=7
+        }
+        return sign ? -val : val;
+}
+
 // Replace the HIP intrinsic with manual NVFP4 E2M1 decode
 __forceinline__ __device__ float decode_nvfp4_e2m1(uint8_t nibble)
 {
@@ -287,8 +306,9 @@ __global__ void dequantize_nvfp4_kernel(const IType* const input, const float* g
 
         // Compute decode scale: decode_scale = block_scale_fp8 * global_decode_scale
         const float global_decode_scale = global_scale[0];
-        float decode_scale = static_cast<float>(block_scale_fp8) * global_decode_scale;
-
+        // ADD THIS LINE — manually decode E4M3 with bias=7:
+        uint8_t scale_byte = *reinterpret_cast<const uint8_t*>(&block_scale_fp8);
+        float decode_scale = decode_std_e4m3_scale(scale_byte) * global_decode_scale;
         // Read packed FP4 values
         // With kValsPerThread=4, we read 2 packed values (each IType contains 2 FP4
         // values)
@@ -297,6 +317,11 @@ __global__ void dequantize_nvfp4_kernel(const IType* const input, const float* g
         // Unpack and dequantize
         OType vals_output[kValsPerThread];
 
+        if (idx == 0)
+        {
+                printf("NVFP4 dequant: scale_byte=0x%02x, decode_scale=%f, global=%f\n", scale_byte,
+                       decode_scale, global_decode_scale);
+        }
         // __nv_cvt_fp4x2_to_halfraw2 returns: .x = low nibble value, .y = high nibble
         // value. HiFirst=true:  high nibble = even index (val0), low nibble = odd
         // index (val1) → .y=val0, .x=val1 HiFirst=false: high nibble = odd index
