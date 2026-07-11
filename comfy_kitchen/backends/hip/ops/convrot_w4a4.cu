@@ -10,41 +10,24 @@
 #include <cfloat>
 #include <cstdint>
 #include <limits>
+#include <rocwmma/rocwmma.hpp>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 
-#include "dtype_dispatch.cuh"
+#include "../dtype_dispatch.h"
+#include "../utils.h"
 #include "svdquant_utils.cuh"
-
-// #ifdef COMFY_HAVE_CUTLASS
-// #include "cutlass/cutlass.h"
-// #include "cutlass/gemm/device/gemm.h"
-// #include "cutlass/gemm/device/gemm_universal_adapter.h"
-// #include "cutlass/gemm/kernel/default_gemm_universal_with_visitor.h"
-// #include "cutlass/epilogue/threadblock/fusion/visitors.hpp"
-// #include <map>
-// #include <mutex>
-// #include <tuple>
-// #endif
 
 extern "C" void launch_cublas_gemm_int8_kernel(const void* A_ptr, const void* B_ptr, void* C_ptr,
                                                int64_t M, int64_t N, int64_t K, void* workspace_ptr,
                                                int64_t workspace_size, hipStream_t stream);
 
-// extern "C" bool launch_cutlass_int8_dequant_strided(
-//     const void* A,
-//     const void* B,
-//     const void* xs,
-//     const void* ws,
-//     const void* bias,
-//     void* D,
-//     int64_t M,
-//     int64_t N,
-//     int64_t K,
-//     int64_t output_stride,
-//     int out_dtype_code,
-//     cudaStream_t stream);
+// extern "C" bool launch_cutlass_int8_dequant_strided(const void* A, const void* B, const void* xs,
+//                                                     const void* ws, const void* bias, void* D,
+//                                                     int64_t M, int64_t N, int64_t K,
+//                                                     int64_t output_stride, int out_dtype_code,
+//                                                     hipStream_t stream);
 
 namespace
 {
@@ -56,6 +39,7 @@ using comfy::svdquant::kGroupSize;
 using comfy::svdquant::kInt4Max;
 using comfy::svdquant::mma_m16n8k64_s4s4s32;
 using comfy::svdquant::pack_int4_pair;
+using comfy::svdquant::unpack_int4_to_int8;
 
 constexpr int kThreadsPerWarp = 32;
 constexpr int kConvRotGroup = 256;
@@ -134,309 +118,6 @@ __device__ __forceinline__ int unpack_int4_nibble(uint32_t v)
         return static_cast<int>((v & 0x0fu) ^ 0x08u) - 8;
 }
 
-// #ifdef COMFY_HAVE_CUTLASS
-// template <typename ElementOutput, int TBM, int TBN, int TBK, int WM, int WN, int WK, int
-// NumStages> struct FusedInt4Gemm {
-//     using ElementA = cutlass::int4b_t;
-//     using ElementB = cutlass::int4b_t;
-//     using ElementC = ElementOutput;
-//     using ElementAcc = int32_t;
-//     using ElementCompute = float;
-//     using LayoutA = cutlass::layout::RowMajor;
-//     using LayoutB = cutlass::layout::ColumnMajor;
-//     using LayoutC = cutlass::layout::RowMajor;
-//     static constexpr int AlignA = 32;
-//     static constexpr int AlignB = 32;
-//     static constexpr int AlignC = 128 / cutlass::sizeof_bits<ElementC>::value;
-//     using TB = cutlass::gemm::GemmShape<TBM, TBN, TBK>;
-//     using Warp = cutlass::gemm::GemmShape<WM, WN, WK>;
-//     using Inst = cutlass::gemm::GemmShape<16, 8, 64>;
-//     static constexpr int EVTStages = 1;
-//
-//     using ThreadMap = cutlass::epilogue::threadblock::OutputTileThreadLayout<TB, Warp, ElementC,
-//     AlignC, EVTStages>; using Accum = cutlass::epilogue::threadblock::VisitorAccFetch; using
-//     XScale = cutlass::epilogue::threadblock::VisitorColBroadcast<ThreadMap, ElementCompute,
-//     cute::Stride<cute::_1, cute::_0, int32_t>>; using WScale =
-//     cutlass::epilogue::threadblock::VisitorRowBroadcast<ThreadMap, ElementCompute,
-//     cute::Stride<cute::_0, cute::_1, int32_t>>; using Bias =
-//     cutlass::epilogue::threadblock::VisitorRowBroadcast<ThreadMap, ElementCompute,
-//     cute::Stride<cute::_0, cute::_1, int32_t>>; using Mul0 =
-//     cutlass::epilogue::threadblock::VisitorCompute<cutlass::multiplies, ElementCompute,
-//     ElementCompute, cutlass::FloatRoundStyle::round_to_nearest>; using EVT0 =
-//     cutlass::epilogue::threadblock::Sm80EVT<Mul0, Accum, XScale>; using Mul1 =
-//     cutlass::epilogue::threadblock::VisitorCompute<cutlass::multiplies, ElementCompute,
-//     ElementCompute, cutlass::FloatRoundStyle::round_to_nearest>; using EVT1 =
-//     cutlass::epilogue::threadblock::Sm80EVT<Mul1, EVT0, WScale>; using Add2 =
-//     cutlass::epilogue::threadblock::VisitorCompute<cutlass::plus, ElementOutput, ElementCompute,
-//     cutlass::FloatRoundStyle::round_to_nearest>; using EVT2 =
-//     cutlass::epilogue::threadblock::Sm80EVT<Add2, EVT1, Bias>; using StoreD =
-//     cutlass::epilogue::threadblock::VisitorAuxStore<ThreadMap, ElementOutput,
-//     cutlass::FloatRoundStyle::round_to_nearest, cute::Stride<int64_t, cute::_1, int64_t>>; using
-//     EVTD = cutlass::epilogue::threadblock::Sm80EVT<StoreD, EVT2>;
-//
-//     using GemmKernel = typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
-//         ElementA, LayoutA, cutlass::ComplexTransform::kNone, AlignA,
-//         ElementB, LayoutB, cutlass::ComplexTransform::kNone, AlignB,
-//         ElementC, LayoutC, AlignC,
-//         ElementAcc, ElementCompute,
-//         cutlass::arch::OpClassTensorOp, cutlass::arch::Sm89,
-//         TB, Warp, Inst, EVTD,
-//         cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>,
-//         NumStages, cutlass::arch::OpMultiplyAddSaturate, EVTStages>::GemmKernel;
-//     using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
-//
-//     static bool run(const int8_t* A, const int8_t* B, const float* xs, const float* ws,
-//                     const float* bias, ElementOutput* D, int M, int N, int K, cudaStream_t
-//                     stream) {
-//         cutlass::gemm::GemmCoord problem(M, N, K);
-//         typename EVTD::Arguments cb{
-//             { {  { {}, {const_cast<float*>(xs), 0.f, {cute::_1{}, cute::_0{}, M}}, {} },
-//                  {const_cast<float*>(ws), 0.f, {cute::_0{}, cute::_1{}, N}}, {} },
-//               {const_cast<float*>(bias), 0.f, {cute::_0{}, cute::_1{}, N}}, {} },
-//             {D, {N, cute::_1{}, M * N}} };
-//         typename Gemm::Arguments args(
-//             cutlass::gemm::GemmUniversalMode::kGemm, problem, 1, cb,
-//             reinterpret_cast<cutlass::int4b_t*>(const_cast<int8_t*>(A)),
-//             reinterpret_cast<cutlass::int4b_t*>(const_cast<int8_t*>(B)),
-//             nullptr, nullptr,
-//             (int64_t)M * K, (int64_t)N * K, 0, 0, K, K, 0, 0);
-//
-//         Gemm gemm;
-//         if (gemm.can_implement(args) != cutlass::Status::kSuccess) return false;
-//         if (Gemm::get_workspace_size(args) != 0) return false;
-//         if (gemm.initialize(args, nullptr, stream) != cutlass::Status::kSuccess) return false;
-//         return gemm(stream) == cutlass::Status::kSuccess;
-//     }
-// };
-//
-// template <typename ElementOutput, int TBM, int TBN, int TBK, int WM, int WN, int WK, int
-// NumStages> struct FusedInt4GemmNoBias {
-//     using ElementA = cutlass::int4b_t;
-//     using ElementB = cutlass::int4b_t;
-//     using ElementC = ElementOutput;
-//     using ElementAcc = int32_t;
-//     using ElementCompute = float;
-//     using LayoutA = cutlass::layout::RowMajor;
-//     using LayoutB = cutlass::layout::ColumnMajor;
-//     using LayoutC = cutlass::layout::RowMajor;
-//     static constexpr int AlignA = 32;
-//     static constexpr int AlignB = 32;
-//     static constexpr int AlignC = 128 / cutlass::sizeof_bits<ElementC>::value;
-//     using TB = cutlass::gemm::GemmShape<TBM, TBN, TBK>;
-//     using Warp = cutlass::gemm::GemmShape<WM, WN, WK>;
-//     using Inst = cutlass::gemm::GemmShape<16, 8, 64>;
-//     static constexpr int EVTStages = 1;
-//
-//     using ThreadMap = cutlass::epilogue::threadblock::OutputTileThreadLayout<TB, Warp, ElementC,
-//     AlignC, EVTStages>; using Accum = cutlass::epilogue::threadblock::VisitorAccFetch; using
-//     XScale = cutlass::epilogue::threadblock::VisitorColBroadcast<ThreadMap, ElementCompute,
-//     cute::Stride<cute::_1, cute::_0, int32_t>>; using WScale =
-//     cutlass::epilogue::threadblock::VisitorRowBroadcast<ThreadMap, ElementCompute,
-//     cute::Stride<cute::_0, cute::_1, int32_t>>; using Mul0 =
-//     cutlass::epilogue::threadblock::VisitorCompute<cutlass::multiplies, ElementCompute,
-//     ElementCompute, cutlass::FloatRoundStyle::round_to_nearest>; using EVT0 =
-//     cutlass::epilogue::threadblock::Sm80EVT<Mul0, Accum, XScale>; using Mul1 =
-//     cutlass::epilogue::threadblock::VisitorCompute<cutlass::multiplies, ElementOutput,
-//     ElementCompute, cutlass::FloatRoundStyle::round_to_nearest>; using EVT1 =
-//     cutlass::epilogue::threadblock::Sm80EVT<Mul1, EVT0, WScale>; using StoreD =
-//     cutlass::epilogue::threadblock::VisitorAuxStore<ThreadMap, ElementOutput,
-//     cutlass::FloatRoundStyle::round_to_nearest, cute::Stride<int64_t, cute::_1, int64_t>>; using
-//     EVTD = cutlass::epilogue::threadblock::Sm80EVT<StoreD, EVT1>;
-//
-//     using GemmKernel = typename cutlass::gemm::kernel::DefaultGemmWithVisitor<
-//         ElementA, LayoutA, cutlass::ComplexTransform::kNone, AlignA,
-//         ElementB, LayoutB, cutlass::ComplexTransform::kNone, AlignB,
-//         ElementC, LayoutC, AlignC,
-//         ElementAcc, ElementCompute,
-//         cutlass::arch::OpClassTensorOp, cutlass::arch::Sm89,
-//         TB, Warp, Inst, EVTD,
-//         cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>,
-//         NumStages, cutlass::arch::OpMultiplyAddSaturate, EVTStages>::GemmKernel;
-//     using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
-//
-//     static bool run(const int8_t* A, const int8_t* B, const float* xs, const float* ws,
-//                     ElementOutput* D, int M, int N, int K, cudaStream_t stream) {
-//         cutlass::gemm::GemmCoord problem(M, N, K);
-//         typename EVTD::Arguments cb{
-//             { { {}, {const_cast<float*>(xs), 0.f, {cute::_1{}, cute::_0{}, M}}, {} },
-//               {const_cast<float*>(ws), 0.f, {cute::_0{}, cute::_1{}, N}}, {} },
-//             {D, {N, cute::_1{}, M * N}} };
-//         typename Gemm::Arguments args(
-//             cutlass::gemm::GemmUniversalMode::kGemm, problem, 1, cb,
-//             reinterpret_cast<cutlass::int4b_t*>(const_cast<int8_t*>(A)),
-//             reinterpret_cast<cutlass::int4b_t*>(const_cast<int8_t*>(B)),
-//             nullptr, nullptr,
-//             (int64_t)M * K, (int64_t)N * K, 0, 0, K, K, 0, 0);
-//
-//         Gemm gemm;
-//         if (gemm.can_implement(args) != cutlass::Status::kSuccess) return false;
-//         if (Gemm::get_workspace_size(args) != 0) return false;
-//         if (gemm.initialize(args, nullptr, stream) != cutlass::Status::kSuccess) return false;
-//         return gemm(stream) == cutlass::Status::kSuccess;
-//     }
-// };
-//
-// template <typename OutT>
-// bool dispatch_fused_int4(const int8_t* A, const int8_t* B, const float* xs, const float* ws,
-//                          const float* bias, OutT* D, int M, int N, int K, cudaStream_t stream) {
-//     using Fn = bool (*)(const int8_t*, const int8_t*, const float*, const float*, const float*,
-//     OutT*, int, int, int, cudaStream_t); static const Fn runners[] = {
-//         &FusedInt4Gemm<OutT, 128, 256, 128, 64, 64, 128, 3>::run,
-//         &FusedInt4Gemm<OutT, 128, 256, 256, 64, 64, 256, 3>::run,
-//         &FusedInt4Gemm<OutT, 128, 512, 256, 64, 128, 256, 3>::run,
-//         &FusedInt4Gemm<OutT, 256, 256, 256, 64, 128, 256, 3>::run,
-//         &FusedInt4Gemm<OutT, 256, 128, 256, 64, 64, 256, 3>::run,
-//         &FusedInt4Gemm<OutT, 128, 128, 256, 64, 64, 256, 3>::run,
-//         &FusedInt4Gemm<OutT,  64, 256, 256, 64, 64, 256, 3>::run,
-//     };
-//     constexpr int NC = sizeof(runners) / sizeof(runners[0]);
-//
-//     if (M == 4608 && N == 3072 && K == 15360) {
-//         return runners[0](A, B, xs, ws, bias, D, M, N, K, stream);
-//     }
-//
-//     static std::mutex mtx;
-//     static std::map<std::tuple<int, int, int>, int> cache;
-//     const std::tuple<int, int, int> key{M, N, K};
-//
-//     static thread_local int last_m = -1;
-//     static thread_local int last_n = -1;
-//     static thread_local int last_k = -1;
-//     static thread_local int last_best = -2;
-//     if (M == last_m && N == last_n && K == last_k) {
-//         if (last_best < 0) return false;
-//         if (runners[last_best](A, B, xs, ws, bias, D, M, N, K, stream)) return true;
-//         return runners[last_best](A, B, xs, ws, bias, D, M, N, K, stream);
-//     }
-//
-//     int best;
-//     {
-//         std::lock_guard<std::mutex> lk(mtx);
-//         auto it = cache.find(key);
-//         best = (it != cache.end()) ? it->second : -2;
-//     }
-//     if (best == -2) {
-//         best = -1;
-//         float best_ms = 1e30f;
-//         cudaEvent_t s, e;
-//         cudaEventCreate(&s);
-//         cudaEventCreate(&e);
-//         for (int i = 0; i < NC; ++i) {
-//             if (!runners[i](A, B, xs, ws, bias, D, M, N, K, stream)) continue;
-//             cudaStreamSynchronize(stream);
-//             for (int r = 0; r < 8; ++r) {
-//                 runners[i](A, B, xs, ws, bias, D, M, N, K, stream);
-//             }
-//             cudaStreamSynchronize(stream);
-//             cudaEventRecord(s, stream);
-//             for (int r = 0; r < 32; ++r) {
-//                 runners[i](A, B, xs, ws, bias, D, M, N, K, stream);
-//             }
-//             cudaEventRecord(e, stream);
-//             cudaEventSynchronize(e);
-//             float ms = 0.f;
-//             cudaEventElapsedTime(&ms, s, e);
-//             if (ms < best_ms) {
-//                 best_ms = ms;
-//                 best = i;
-//             }
-//         }
-//         cudaEventDestroy(s);
-//         cudaEventDestroy(e);
-//         std::lock_guard<std::mutex> lk(mtx);
-//         cache[key] = best;
-//     }
-//     last_m = M;
-//     last_n = N;
-//     last_k = K;
-//     last_best = best;
-//     if (best < 0) return false;
-//     if (runners[best](A, B, xs, ws, bias, D, M, N, K, stream)) return true;
-//     return runners[best](A, B, xs, ws, bias, D, M, N, K, stream);
-// }
-//
-// template <typename OutT>
-// bool dispatch_fused_int4_no_bias(const int8_t* A, const int8_t* B, const float* xs, const float*
-// ws,
-//                                  OutT* D, int M, int N, int K, cudaStream_t stream) {
-//     using Fn = bool (*)(const int8_t*, const int8_t*, const float*, const float*, OutT*, int,
-//     int, int, cudaStream_t); static const Fn runners[] = {
-//         &FusedInt4GemmNoBias<OutT, 128, 256, 128, 64, 64, 128, 3>::run,
-//         &FusedInt4GemmNoBias<OutT, 128, 256, 256, 64, 64, 256, 3>::run,
-//         &FusedInt4GemmNoBias<OutT, 128, 512, 256, 64, 128, 256, 3>::run,
-//         &FusedInt4GemmNoBias<OutT, 256, 256, 256, 64, 128, 256, 3>::run,
-//         &FusedInt4GemmNoBias<OutT, 256, 128, 256, 64, 64, 256, 3>::run,
-//         &FusedInt4GemmNoBias<OutT, 128, 128, 256, 64, 64, 256, 3>::run,
-//         &FusedInt4GemmNoBias<OutT,  64, 256, 256, 64, 64, 256, 3>::run,
-//     };
-//     constexpr int NC = sizeof(runners) / sizeof(runners[0]);
-//
-//     if (M == 4608 && N == 3072 && K == 15360) {
-//         return runners[0](A, B, xs, ws, D, M, N, K, stream);
-//     }
-//
-//     static std::mutex mtx;
-//     static std::map<std::tuple<int, int, int>, int> cache;
-//     const std::tuple<int, int, int> key{M, N, K};
-//
-//     static thread_local int last_m = -1;
-//     static thread_local int last_n = -1;
-//     static thread_local int last_k = -1;
-//     static thread_local int last_best = -2;
-//     if (M == last_m && N == last_n && K == last_k) {
-//         if (last_best < 0) return false;
-//         if (runners[last_best](A, B, xs, ws, D, M, N, K, stream)) return true;
-//         return runners[last_best](A, B, xs, ws, D, M, N, K, stream);
-//     }
-//
-//     int best;
-//     {
-//         std::lock_guard<std::mutex> lk(mtx);
-//         auto it = cache.find(key);
-//         best = (it != cache.end()) ? it->second : -2;
-//     }
-//     if (best == -2) {
-//         best = -1;
-//         float best_ms = 1e30f;
-//         cudaEvent_t s, e;
-//         cudaEventCreate(&s);
-//         cudaEventCreate(&e);
-//         for (int i = 0; i < NC; ++i) {
-//             if (!runners[i](A, B, xs, ws, D, M, N, K, stream)) continue;
-//             cudaStreamSynchronize(stream);
-//             for (int r = 0; r < 8; ++r) {
-//                 runners[i](A, B, xs, ws, D, M, N, K, stream);
-//             }
-//             cudaStreamSynchronize(stream);
-//             cudaEventRecord(s, stream);
-//             for (int r = 0; r < 32; ++r) {
-//                 runners[i](A, B, xs, ws, D, M, N, K, stream);
-//             }
-//             cudaEventRecord(e, stream);
-//             cudaEventSynchronize(e);
-//             float ms = 0.f;
-//             cudaEventElapsedTime(&ms, s, e);
-//             if (ms < best_ms) {
-//                 best_ms = ms;
-//                 best = i;
-//             }
-//         }
-//         cudaEventDestroy(s);
-//         cudaEventDestroy(e);
-//         std::lock_guard<std::mutex> lk(mtx);
-//         cache[key] = best;
-//     }
-//     last_m = M;
-//     last_n = N;
-//     last_k = K;
-//     last_best = best;
-//     if (best < 0) return false;
-//     if (runners[best](A, B, xs, ws, D, M, N, K, stream)) return true;
-//     return runners[best](A, B, xs, ws, D, M, N, K, stream);
-// }
-//
-// #endif
-
 template <typename T>
 __device__ __forceinline__ float to_float(T v);
 
@@ -487,7 +168,7 @@ __device__ __forceinline__ float block_reduce_max(float v, float* warp_smem, flo
 #pragma unroll
         for (int offset = 16; offset > 0; offset >>= 1)
         {
-                v = fmaxf(v, __shfl_down_sync(0xffffffffu, v, offset));
+                v = fmaxf(v, __shfl_down_sync(0x00000000fffffffful, v, offset));
         }
         if (lane == 0)
         {
@@ -500,7 +181,7 @@ __device__ __forceinline__ float block_reduce_max(float v, float* warp_smem, flo
 #pragma unroll
                 for (int offset = 16; offset > 0; offset >>= 1)
                 {
-                        total = fmaxf(total, __shfl_down_sync(0xffffffffu, total, offset));
+                        total = fmaxf(total, __shfl_down_sync(0x00000000fffffffful, total, offset));
                 }
                 if (lane == 0)
                 {
@@ -641,7 +322,8 @@ __device__ __forceinline__ void convrot_h4_store_typed(__half x0, __half x1, __h
 
 __device__ __forceinline__ void convrot_h4_store_typed(__hip_bfloat16 x0, __hip_bfloat16 x1,
                                                        __hip_bfloat16 x2, __hip_bfloat16 x3,
-                                                       __hip_bfloat16* __restrict__ output, int base)
+                                                       __hip_bfloat16* __restrict__ output,
+                                                       int base)
 {
         const __hip_bfloat16 x01 = __hadd(x0, x1);
         const __hip_bfloat16 x0m1 = __hsub(x0, x1);
@@ -686,14 +368,13 @@ __device__ __forceinline__ void dequant_int4_h4_store_typed(int q0, int q1, int 
                                                             __hip_bfloat16* __restrict__ output,
                                                             int base)
 {
-        const __hip_bfloat162 s = __float2bfloat162_rn(0.5f * scale);
-        const __hip_bfloat162 y01 =
-            __hmul2(__floats2bfloat162_rn(static_cast<float>(q0 + q1 + q2 - q3),
-                                          static_cast<float>(q0 + q1 - q2 + q3)),
-                    s);
+        const __hip_bfloat162 s = __lows2bfloat162(0.5f * scale, 0.5f * scale);
+        const __hip_bfloat162 y01 = __hmul2(__lows2bfloat162(static_cast<float>(q0 + q1 + q2 - q3),
+                                                             static_cast<float>(q0 + q1 - q2 + q3)),
+                                            s);
         const __hip_bfloat162 y23 =
-            __hmul2(__floats2bfloat162_rn(static_cast<float>(q0 - q1 + q2 + q3),
-                                          static_cast<float>(-q0 + q1 + q2 + q3)),
+            __hmul2(__lows2bfloat162(static_cast<float>(q0 - q1 + q2 + q3),
+                                     static_cast<float>(-q0 + q1 + q2 + q3)),
                     s);
         *reinterpret_cast<__hip_bfloat162*>(output + base) = y01;
         *reinterpret_cast<__hip_bfloat162*>(output + base + 2) = y23;
@@ -719,8 +400,8 @@ __device__ __forceinline__ void convrot_fht_stage64_typed(const __half* __restri
 }
 
 __device__ __forceinline__ void convrot_fht_stage64_typed(const __hip_bfloat16* __restrict__ src,
-                                                          __hip_bfloat16* __restrict__ dst, int lane,
-                                                          int stride)
+                                                          __hip_bfloat16* __restrict__ dst,
+                                                          int lane, int stride)
 {
         const int base = (lane % stride) + (lane / stride) * (4 * stride);
         const __hip_bfloat16 x0 = src[base];
@@ -779,13 +460,15 @@ __device__ __forceinline__ void convrot_fht_stage64_vec2_typed(
         const int base = (lane % stride) + (lane / stride) * (4 * stride);
         const __hip_bfloat162 x0 = *reinterpret_cast<const __hip_bfloat162*>(src + base);
         const __hip_bfloat162 x1 = *reinterpret_cast<const __hip_bfloat162*>(src + base + stride);
-        const __hip_bfloat162 x2 = *reinterpret_cast<const __hip_bfloat162*>(src + base + 2 * stride);
-        const __hip_bfloat162 x3 = *reinterpret_cast<const __hip_bfloat162*>(src + base + 3 * stride);
+        const __hip_bfloat162 x2 =
+            *reinterpret_cast<const __hip_bfloat162*>(src + base + 2 * stride);
+        const __hip_bfloat162 x3 =
+            *reinterpret_cast<const __hip_bfloat162*>(src + base + 3 * stride);
         const __hip_bfloat162 x01 = __hadd2(x0, x1);
         const __hip_bfloat162 x0m1 = __hsub2(x0, x1);
         const __hip_bfloat162 x23 = __hadd2(x2, x3);
         const __hip_bfloat162 x2m3 = __hsub2(x2, x3);
-        const __hip_bfloat162 s = __float2bfloat162_rn(0.5f);
+        const __hip_bfloat162 s = __lows2bfloat162(0.5f, 0.5f);
         *reinterpret_cast<__hip_bfloat162*>(dst + base) = __hmul2(__hadd2(x01, x2m3), s);
         *reinterpret_cast<__hip_bfloat162*>(dst + base + stride) = __hmul2(__hsub2(x01, x2m3), s);
         *reinterpret_cast<__hip_bfloat162*>(dst + base + 2 * stride) =
@@ -802,7 +485,8 @@ __device__ __forceinline__ void convrot_fht_stage64_store_typed(const __half* __
 }
 
 __device__ __forceinline__ void convrot_fht_stage64_store_typed(
-    const __hip_bfloat16* __restrict__ src, __hip_bfloat16* __restrict__ output, int lane, int stride)
+    const __hip_bfloat16* __restrict__ src, __hip_bfloat16* __restrict__ output, int lane,
+    int stride)
 {
         convrot_fht_stage64_typed(src, output, lane, stride);
 }
@@ -854,7 +538,7 @@ __device__ __forceinline__ void convrot_fht_stage64_store_final_typed(
         const __hip_bfloat162 x0m1 = __hsub2(x0, x1);
         const __hip_bfloat162 x23 = __hadd2(x2, x3);
         const __hip_bfloat162 x2m3 = __hsub2(x2, x3);
-        const __hip_bfloat162 s = __float2bfloat162_rn(0.5f);
+        const __hip_bfloat162 s = __lows2bfloat162(0.5f, 0.5f);
         *reinterpret_cast<__hip_bfloat162*>(output + col) = __hmul2(__hadd2(x01, x2m3), s);
         *reinterpret_cast<__hip_bfloat162*>(output + col + 64) = __hmul2(__hsub2(x01, x2m3), s);
         *reinterpret_cast<__hip_bfloat162*>(output + col + 128) = __hmul2(__hadd2(x0m1, x23), s);
@@ -923,7 +607,8 @@ __device__ __forceinline__ float convrot_fht_stage64_store_absmax_typed(
 }
 
 __device__ __forceinline__ float convrot_fht_stage64_store_absmax_typed(
-    const __hip_bfloat16* __restrict__ src, __hip_bfloat16* __restrict__ output, int lane, int stride)
+    const __hip_bfloat16* __restrict__ src, __hip_bfloat16* __restrict__ output, int lane,
+    int stride)
 {
         if (stride == 64)
         {
@@ -933,14 +618,17 @@ __device__ __forceinline__ float convrot_fht_stage64_store_absmax_typed(
                 }
                 const int col = lane * 2;
                 const __hip_bfloat162 x0 = *reinterpret_cast<const __hip_bfloat162*>(src + col);
-                const __hip_bfloat162 x1 = *reinterpret_cast<const __hip_bfloat162*>(src + col + 64);
-                const __hip_bfloat162 x2 = *reinterpret_cast<const __hip_bfloat162*>(src + col + 128);
-                const __hip_bfloat162 x3 = *reinterpret_cast<const __hip_bfloat162*>(src + col + 192);
+                const __hip_bfloat162 x1 =
+                    *reinterpret_cast<const __hip_bfloat162*>(src + col + 64);
+                const __hip_bfloat162 x2 =
+                    *reinterpret_cast<const __hip_bfloat162*>(src + col + 128);
+                const __hip_bfloat162 x3 =
+                    *reinterpret_cast<const __hip_bfloat162*>(src + col + 192);
                 const __hip_bfloat162 x01 = __hadd2(x0, x1);
                 const __hip_bfloat162 x0m1 = __hsub2(x0, x1);
                 const __hip_bfloat162 x23 = __hadd2(x2, x3);
                 const __hip_bfloat162 x2m3 = __hsub2(x2, x3);
-                const __hip_bfloat162 s = __float2bfloat162_rn(0.5f);
+                const __hip_bfloat162 s = __lows2bfloat162(0.5f, 0.5f);
                 const __hip_bfloat162 y0 = __hmul2(__hadd2(x01, x2m3), s);
                 const __hip_bfloat162 y1 = __hmul2(__hsub2(x01, x2m3), s);
                 const __hip_bfloat162 y2 = __hmul2(__hadd2(x0m1, x23), s);
@@ -1572,20 +1260,8 @@ __global__ void dequantize_int4_convrot64_warp32_kernel(const int8_t* __restrict
         }
 }
 
-constexpr int kStages = 3;
-constexpr int kMUnroll = 1;
-constexpr int kWarpM = kMUnroll * 16;
-constexpr int kNUnroll = 8;
-constexpr int kWarpN = kNUnroll * 8;
 constexpr int kWarpsM = 2;
 constexpr int kWarpsN = 4;
-constexpr int kNumWarps = kWarpsM * kWarpsN;
-constexpr int kBlockM = kWarpM * kWarpsM;
-constexpr int kBlockN = kWarpN * kWarpsN;
-constexpr int kBlockKBytes = kGroupSize / 2;
-constexpr int kThreadsPerBlock = kNumWarps * 32;
-constexpr int kBLoadChunks = kBlockN * 2;
-constexpr int kBLoadSweeps = (kBLoadChunks + kThreadsPerBlock - 1) / kThreadsPerBlock;
 
 template <typename OutType, typename BiasType>
 __global__ void int4_linear_kernel(const int8_t* __restrict__ act,
@@ -1595,225 +1271,161 @@ __global__ void int4_linear_kernel(const int8_t* __restrict__ act,
                                    const BiasType* __restrict__ bias, OutType* __restrict__ out,
                                    int M, int N, int K, bool has_bias)
 {
+        // AMD-optimized tile dimensions
+        constexpr int kBlockM = 32;
+        constexpr int kBlockN = 128;
+        constexpr int kBlockKInt8 = kGroupSize;  // 64 int8 per row (unpacked from 32 bytes int4)
+        constexpr int kBlockKBytes = kGroupSize / 2;
+        constexpr int kWarpM = 16;
+        constexpr int kNUnroll = 2;
+        constexpr int kWarpN = kNUnroll * 16;
+        constexpr int kWarpsN = 4;
+        constexpr int kNumWarps = 8;
+        constexpr int kThreadsPerBlock = kNumWarps * 32;
+
         const int cta_m = blockIdx.y * kBlockM;
         const int cta_n = blockIdx.x * kBlockN;
         const int warp_id = threadIdx.x >> 5;
-        const int lane = threadIdx.x & 31;
         const int warp_m = warp_id & (kWarpsM - 1);
         const int warp_n = warp_id / kWarpsM;
-        const int groupID = lane >> 2;
-        const int tid_in_group = lane & 3;
-        const int warp_m_base = cta_m + warp_m * kWarpM;
-        const int warp_n_base = cta_n + warp_n * kWarpN;
-
-        int32_t accum[kMUnroll][kNUnroll][4];
-#pragma unroll
-        for (int mi = 0; mi < kMUnroll; ++mi)
-        {
-#pragma unroll
-                for (int c = 0; c < kNUnroll; ++c)
-                {
-#pragma unroll
-                        for (int i = 0; i < 4; ++i)
-                        {
-                                accum[mi][c][i] = 0;
-                        }
-                }
-        }
-
         const int K_half = K / 2;
         const int num_groups = K / kGroupSize;
 
-        __shared__ alignas(16) int8_t smem_B[kStages][kBlockN * kBlockKBytes];
-        __shared__ alignas(16) int8_t smem_A[kStages][kBlockM * kBlockKBytes];
+        // Shared memory - unpacked int8
+        __shared__ alignas(16) int8_t smem_A[kBlockM * kBlockKInt8];
+        __shared__ alignas(16) int8_t smem_B[kBlockN * kBlockKInt8];
+        __shared__ alignas(16) int32_t smem_acc[kBlockM * kBlockN];
+        __shared__ alignas(16) float acc_fp32[kBlockM * kBlockN];
 
-        auto issue_B_load = [&](int g, int stage)
-        {
-                if (g >= num_groups) return;
-                const int thread_idx = threadIdx.x;
-#pragma unroll
-                for (int sweep = 0; sweep < kBLoadSweeps; ++sweep)
-                {
-                        const int t = thread_idx + sweep * kThreadsPerBlock;
-                        if (t < kBlockN * 2)
-                        {
-                                const int n_row = t >> 1;
-                                const int half = t & 1;
-                                const int n_global = cta_n + n_row;
-                                int8_t* dst = &smem_B[stage][n_row * kBlockKBytes + half * 16];
-                                if (n_global < N)
-                                {
-                                        const int8_t* src = weight + n_global * K_half +
-                                                            g * kBlockKBytes + half * 16;
-                                        cp_async_16b(dst, src);
-                                }
-                                else
-                                {
-                                        reinterpret_cast<uint4*>(dst)[0] = {0, 0, 0, 0};
-                                }
-                        }
-                }
-        };
+        // Initialize accumulator
+        for (int i = threadIdx.x; i < kBlockM * kBlockN; i += kThreadsPerBlock)
+                acc_fp32[i] = 0.f;
+        __syncthreads();
 
-        auto issue_A_load = [&](int g, int stage)
+        for (int g = 0; g < num_groups; g++)
         {
-                if (g >= num_groups) return;
-                const int t = threadIdx.x;
-                if (t < kBlockM * 2)
+                // Load A tile: unpack int4→int8 into shared memory
+                const int base_byte = g * kBlockKBytes;
+                for (int t = threadIdx.x; t < kBlockM * kBlockKInt8; t += kThreadsPerBlock)
                 {
-                        const int m_row = t >> 1;
-                        const int half = t & 1;
-                        const int m_global = cta_m + m_row;
-                        int8_t* dst = &smem_A[stage][m_row * kBlockKBytes + half * 16];
+                        int m_row = t / kBlockKInt8;
+                        int k_col = t % kBlockKInt8;
+                        int m_global = cta_m + m_row;
+                        int8_t val = 0;
                         if (m_global < M)
                         {
-                                const int8_t* src =
-                                    act + m_global * K_half + g * kBlockKBytes + half * 16;
-                                cp_async_16b(dst, src);
+                                int byte_idx = base_byte + k_col / 2;
+                                int nibble = k_col & 1;
+                                int8_t packed = act[m_global * K_half + byte_idx];
+                                val = unpack_int4_to_int8(packed, nibble);
                         }
-                        else
+                        smem_A[t] = val;
+                }
+
+                // Load B tile: unpack int4→int8
+                for (int t = threadIdx.x; t < kBlockN * kBlockKInt8; t += kThreadsPerBlock)
+                {
+                        int n_row = t / kBlockKInt8;
+                        int k_col = t % kBlockKInt8;
+                        int n_global = cta_n + n_row;
+                        int8_t val = 0;
+                        if (n_global < N)
                         {
-                                reinterpret_cast<uint4*>(dst)[0] = {0, 0, 0, 0};
+                                int byte_idx = base_byte + k_col / 2;
+                                int nibble = k_col & 1;
+                                int8_t packed = weight[n_global * K_half + byte_idx];
+                                val = unpack_int4_to_int8(packed, nibble);
                         }
+                        smem_B[t] = val;
                 }
-        };
-
-        auto load_B_fragment = [&](int stage, int c, uint32_t (&b_reg)[2])
-        {
-                const int b_col_local = (warp_n * kWarpN) + c * 8 + groupID;
-                const int b_col_global = cta_n + b_col_local;
-                b_reg[0] = b_reg[1] = 0;
-                if (b_col_local < kBlockN && b_col_global < N)
-                {
-                        const int byte0 = tid_in_group * 8;
-                        const int8_t* row_base = &smem_B[stage][b_col_local * kBlockKBytes];
-                        b_reg[0] = *reinterpret_cast<const uint32_t*>(row_base + byte0);
-                        b_reg[1] = *reinterpret_cast<const uint32_t*>(row_base + byte0 + 4);
-                }
-        };
-
-#pragma unroll
-        for (int s = 0; s < kStages - 1; ++s)
-        {
-                issue_A_load(s, s);
-                issue_B_load(s, s);
-                cp_async_commit_group();
-        }
-
-        for (int g = 0; g < num_groups; ++g)
-        {
-                const int next_g = g + kStages - 1;
-                if (next_g < num_groups)
-                {
-                        const int next_stage = (g + kStages - 1) % kStages;
-                        issue_A_load(next_g, next_stage);
-                        issue_B_load(next_g, next_stage);
-                }
-                cp_async_commit_group();
-                cp_async_wait_group<kStages - 1>();
                 __syncthreads();
 
-                const int cur_stage = g % kStages;
-                uint32_t a_reg[kMUnroll][4];
+                // WMMA: 16×16×16 int8, 4 K-slices, 2 N-tiles per warp
+                using A_frag =
+                    rocwmma::fragment<rocwmma::matrix_a, 16, 16, 16, int8_t, rocwmma::row_major>;
+                using B_frag =
+                    rocwmma::fragment<rocwmma::matrix_b, 16, 16, 16, int8_t, rocwmma::col_major>;
+                using AccI32 = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, int32_t>;
+
+                AccI32 acc_i32[kNUnroll];
 #pragma unroll
-                for (int mi = 0; mi < kMUnroll; ++mi)
+                for (int c = 0; c < kNUnroll; c++)
+#pragma unroll
+                        for (int i = 0; i < 8; i++)
+                                acc_i32[c].x[i] = 0;
+
+#pragma unroll
+                for (int ks = 0; ks < 4; ks++)
                 {
-                        const int m_tile_base = warp_m_base + mi * 16;
-                        const int row0_m = m_tile_base + groupID;
-                        const int row1_m = m_tile_base + groupID + 8;
-                        const int row0_local = warp_m * kWarpM + mi * 16 + groupID;
-                        const int row1_local = warp_m * kWarpM + mi * 16 + groupID + 8;
-                        a_reg[mi][0] = a_reg[mi][1] = a_reg[mi][2] = a_reg[mi][3] = 0;
-                        if (row0_m < M)
+                        A_frag a_frag;
+                        rocwmma::load_matrix_sync(
+                            a_frag, &smem_A[warp_m * kWarpM * kBlockKInt8 + ks * 16], kBlockKInt8);
+
+#pragma unroll
+                        for (int c = 0; c < kNUnroll; c++)
                         {
-                                const int8_t* rb = &smem_A[cur_stage][row0_local * kBlockKBytes];
-                                a_reg[mi][0] =
-                                    *reinterpret_cast<const uint32_t*>(rb + tid_in_group * 8);
-                                a_reg[mi][2] =
-                                    *reinterpret_cast<const uint32_t*>(rb + tid_in_group * 8 + 4);
-                        }
-                        if (row1_m < M)
-                        {
-                                const int8_t* rb = &smem_A[cur_stage][row1_local * kBlockKBytes];
-                                a_reg[mi][1] =
-                                    *reinterpret_cast<const uint32_t*>(rb + tid_in_group * 8);
-                                a_reg[mi][3] =
-                                    *reinterpret_cast<const uint32_t*>(rb + tid_in_group * 8 + 4);
+                                B_frag b_frag;
+                                rocwmma::load_matrix_sync(
+                                    b_frag,
+                                    &smem_B[(warp_n * kWarpN + c * 16) * kBlockKInt8 + ks * 16],
+                                    kBlockKInt8);
+                                rocwmma::mma_sync(acc_i32[c], a_frag, b_frag, acc_i32[c]);
                         }
                 }
 
+// Store int32 to shared memory
 #pragma unroll
-                for (int c = 0; c < kNUnroll; ++c)
+                for (int c = 0; c < kNUnroll; c++)
+                        rocwmma::store_matrix_sync(
+                            &smem_acc[warp_m * kWarpM * kBlockN + warp_n * kWarpN + c * 16],
+                            acc_i32[c], kBlockN, rocwmma::mem_row_major);
+                __syncthreads();
+
+                // Dequant: flat read, multiply by scales
+                for (int i = threadIdx.x; i < kBlockM * kBlockN; i += kThreadsPerBlock)
                 {
-                        uint32_t b_reg[2];
-                        load_B_fragment(cur_stage, c, b_reg);
-#pragma unroll
-                        for (int mi = 0; mi < kMUnroll; ++mi)
+                        int row_global = cta_m + i / kBlockN;
+                        int col_global = cta_n + i % kBlockN;
+                        if (row_global < M && col_global < N)
                         {
-                                int32_t zero[4] = {0, 0, 0, 0};
-                                int32_t d[4];
-                                mma_m16n8k64_s4s4s32(a_reg[mi], b_reg, zero, d);
-                                accum[mi][c][0] += d[0];
-                                accum[mi][c][1] += d[1];
-                                accum[mi][c][2] += d[2];
-                                accum[mi][c][3] += d[3];
+                                int32_t v = smem_acc[i];
+                                acc_fp32[i] +=
+                                    (float)v * x_scales[row_global] * weight_scales[col_global];
                         }
                 }
+                __syncthreads();
         }
-        cp_async_wait_group<0>();
 
-#pragma unroll
-        for (int mi = 0; mi < kMUnroll; ++mi)
+        // Write output
+        for (int i = threadIdx.x; i < kBlockM * kBlockN; i += kThreadsPerBlock)
         {
-                const int m_tile_base = warp_m_base + mi * 16;
-                const int row0_m = m_tile_base + groupID;
-                const int row1_m = m_tile_base + groupID + 8;
-#pragma unroll
-                for (int c = 0; c < kNUnroll; ++c)
+                int row_global = cta_m + i / kBlockN;
+                int col_global = cta_n + i % kBlockN;
+                if (row_global < M && col_global < N)
                 {
-                        const int n_chunk_base = warp_n_base + c * 8;
-                        const int col0 = n_chunk_base + tid_in_group * 2 + 0;
-                        const int col1 = n_chunk_base + tid_in_group * 2 + 1;
-                        if (row0_m < M && col0 < N)
-                        {
-                                float v = static_cast<float>(accum[mi][c][0]) * x_scales[row0_m] *
-                                          weight_scales[col0];
-                                if (has_bias) v += to_float(bias[col0]);
-                                out[row0_m * N + col0] = from_float<OutType>(v);
-                        }
-                        if (row0_m < M && col1 < N)
-                        {
-                                float v = static_cast<float>(accum[mi][c][1]) * x_scales[row0_m] *
-                                          weight_scales[col1];
-                                if (has_bias) v += to_float(bias[col1]);
-                                out[row0_m * N + col1] = from_float<OutType>(v);
-                        }
-                        if (row1_m < M && col0 < N)
-                        {
-                                float v = static_cast<float>(accum[mi][c][2]) * x_scales[row1_m] *
-                                          weight_scales[col0];
-                                if (has_bias) v += to_float(bias[col0]);
-                                out[row1_m * N + col0] = from_float<OutType>(v);
-                        }
-                        if (row1_m < M && col1 < N)
-                        {
-                                float v = static_cast<float>(accum[mi][c][3]) * x_scales[row1_m] *
-                                          weight_scales[col1];
-                                if (has_bias) v += to_float(bias[col1]);
-                                out[row1_m * N + col1] = from_float<OutType>(v);
-                        }
+                        float val = acc_fp32[i];
+                        if (has_bias) val += to_float(bias[col_global]);
+                        out[row_global * N + col_global] = from_float<OutType>(val);
                 }
         }
 }
 
 __device__ __forceinline__ int pack_int4_weight4_as_int8_word(uint32_t packed01, uint32_t packed23)
 {
-        const uint32_t b0 = static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed01)));
-        const uint32_t b1 =
-            static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed01 >> 4)));
-        const uint32_t b2 = static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed23)));
-        const uint32_t b3 =
-            static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed23 >> 4)));
+        // const uint32_t b0 =
+        // static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed01))); const uint32_t
+        // b1 = static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed01 >> 4))); const
+        // uint32_t b2 = static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed23)));
+        // const uint32_t b3 = static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed23
+        // >> 4)));
+        const uint32_t b0 = static_cast<uint8_t>(
+            static_cast<int8_t>(unpack_int4_to_int8(static_cast<int8_t>(packed01), 0)));
+        const uint32_t b1 = static_cast<uint8_t>(
+            static_cast<int8_t>(unpack_int4_to_int8(static_cast<int8_t>(packed01), 1)));
+        const uint32_t b2 = static_cast<uint8_t>(
+            static_cast<int8_t>(unpack_int4_to_int8(static_cast<int8_t>(packed23), 0)));
+        const uint32_t b3 = static_cast<uint8_t>(
+            static_cast<int8_t>(unpack_int4_to_int8(static_cast<int8_t>(packed23), 1)));
         return static_cast<int>(b0 | (b1 << 8) | (b2 << 16) | (b3 << 24));
 }
 
@@ -1843,13 +1455,15 @@ __global__ void int4_weight_int8_act_gemv_dequant_warp_kernel(
         {
                 const uint32_t packed01 = static_cast<uint8_t>(w_row[k4 * 2]);
                 const uint32_t packed23 = static_cast<uint8_t>(w_row[k4 * 2 + 1]);
-                acc = __dp4a(x4[k4], pack_int4_weight4_as_int8_word(packed01, packed23), acc);
+                // acc = __dp4a(x4[k4], pack_int4_weight4_as_int8_word(packed01, packed23), acc);
+                amd_mixed_dot(x4[k4], pack_int4_weight4_as_int8_word(packed01, packed23), acc,
+                              false);
         }
 
 #pragma unroll
         for (int offset = kThreadsPerWarp / 2; offset > 0; offset >>= 1)
         {
-                acc += __shfl_down_sync(0xffffffffu, acc, offset);
+                acc += __shfl_down_sync(0x00000000fffffffful, acc, offset);
         }
 
         if (lane == 0)
@@ -1896,10 +1510,16 @@ __device__ __forceinline__ uint64_t unpack_int4_u32_to_int8_u64(uint32_t packed)
         for (int i = 0; i < 4; ++i)
         {
                 const uint32_t byte = (packed >> (i * 8)) & 0xffu;
+                // const uint32_t low =
+                //     static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(byte)));
+                // const uint32_t high =
+                //     static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(byte >> 4)));
+                // out |= static_cast<uint64_t>(low | (high << 8)) << (i * 16);
                 const uint32_t low =
-                    static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(byte)));
+                    static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_to_int8(byte, 0)));
                 const uint32_t high =
-                    static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(byte >> 4)));
+                    static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_to_int8(byte, 1)));
+
                 out |= static_cast<uint64_t>(low | (high << 8)) << (i * 16);
         }
         return out;
@@ -1921,8 +1541,12 @@ __global__ void unpack_int4_to_int8_vec8_kernel(const int8_t* __restrict__ input
         for (int64_t idx = base; idx < total_packed; ++idx)
         {
                 const uint32_t packed = static_cast<uint8_t>(input[idx]);
-                output[idx * 2] = static_cast<int8_t>(unpack_int4_nibble(packed));
-                output[idx * 2 + 1] = static_cast<int8_t>(unpack_int4_nibble(packed >> 4));
+                // output[idx * 2] = static_cast<int8_t>(unpack_int4_nibble(packed));
+                // output[idx * 2 + 1] = static_cast<int8_t>(unpack_int4_nibble(packed >> 4));
+                output[idx * 2] =
+                    unpack_int4_to_int8(static_cast<int8_t>(packed), 0);  // low nibble
+                output[idx * 2 + 1] =
+                    unpack_int4_to_int8(static_cast<int8_t>(packed), 1);  // high nibbl
         }
 }
 
@@ -1932,8 +1556,7 @@ extern "C"
 {
         void launch_quantize_int4_rowwise_kernel(const void* input, void* output, void* scales,
                                                  int64_t M, int64_t K, int input_dtype_code,
-                                                 bool stochastic, uint64_t seed,
-                                                 hipStream_t stream)
+                                                 bool stochastic, uint64_t seed, hipStream_t stream)
         {
                 if (K % comfy::svdquant::kGroupSize != 0) return;
                 constexpr int kThreads = 256;
@@ -2036,8 +1659,9 @@ extern "C"
                             (static_cast<size_t>(K) +
                              groups_in_flight * scratch_buffers * kConvRotGroup) *
                             sizeof(TypedInput);
-                        hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize,
-                                             static_cast<int>(smem_bytes));
+                        CUDA_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>(kernel),
+                                                       hipFuncAttributeMaxDynamicSharedMemorySize,
+                                                       static_cast<int>(smem_bytes)));
                         kernel<<<static_cast<unsigned int>(M), block_threads, smem_bytes, stream>>>(
                             typed_input, reinterpret_cast<int8_t*>(output),
                             reinterpret_cast<float*>(scales), static_cast<int>(K), seed);
@@ -2052,8 +1676,9 @@ extern "C"
                         const size_t smem_bytes =
                             (static_cast<size_t>(K) + groups_in_flight * 2 * small_group_size) *
                             sizeof(TypedInput);
-                        hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize,
-                                             static_cast<int>(smem_bytes));
+                        CUDA_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>(kernel),
+                                                       hipFuncAttributeMaxDynamicSharedMemorySize,
+                                                       static_cast<int>(smem_bytes)));
                         kernel<<<static_cast<unsigned int>(M), block_threads_small_group,
                                  smem_bytes, stream>>>(
                             typed_input, reinterpret_cast<int8_t*>(output),
@@ -2294,9 +1919,10 @@ extern "C"
                         {
                                 if (stochastic)
                                 {
-                                        launch(quantize_int4_rowwise_convrot64_kernel<
-                                                   __hip_bfloat16, block_threads_small, false, true>,
-                                               typed_input, block_threads_small, 2);
+                                        launch(
+                                            quantize_int4_rowwise_convrot64_kernel<
+                                                __hip_bfloat16, block_threads_small, false, true>,
+                                            typed_input, block_threads_small, 2);
                                 }
                                 else
                                 {
@@ -2333,18 +1959,20 @@ extern "C"
                                 }
                                 else
                                 {
-                                        launch(quantize_int4_rowwise_convrot64_kernel<
-                                                   __hip_bfloat16, block_threads_15360, true, false>,
-                                               typed_input, block_threads_15360, 1);
+                                        launch(
+                                            quantize_int4_rowwise_convrot64_kernel<
+                                                __hip_bfloat16, block_threads_15360, true, false>,
+                                            typed_input, block_threads_15360, 1);
                                 }
                         }
                         else
                         {
                                 if (stochastic)
                                 {
-                                        launch(quantize_int4_rowwise_convrot64_kernel<
-                                                   __hip_bfloat16, block_threads_multi, false, true>,
-                                               typed_input, block_threads_multi, 2);
+                                        launch(
+                                            quantize_int4_rowwise_convrot64_kernel<
+                                                __hip_bfloat16, block_threads_multi, false, true>,
+                                            typed_input, block_threads_multi, 2);
                                 }
                                 else
                                 {
@@ -2506,8 +2134,9 @@ extern "C"
                             (static_cast<size_t>(K) +
                              groups_in_flight * scratch_buffers * kConvRotGroup) *
                             sizeof(TypedInput);
-                        hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize,
-                                             static_cast<int>(smem_bytes));
+                        CUDA_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>(kernel),
+                                                       hipFuncAttributeMaxDynamicSharedMemorySize,
+                                                       static_cast<int>(smem_bytes)));
                         kernel<<<static_cast<unsigned int>(M), block_threads, smem_bytes, stream>>>(
                             typed_input, reinterpret_cast<int8_t*>(output),
                             reinterpret_cast<float*>(scales), static_cast<int>(K), seed);
@@ -2519,8 +2148,9 @@ extern "C"
                         const size_t smem_bytes =
                             (static_cast<size_t>(K) + groups_in_flight * 2 * kConvRotGroup) *
                             sizeof(float);
-                        hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize,
-                                             static_cast<int>(smem_bytes));
+                        CUDA_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>(kernel),
+                                                       hipFuncAttributeMaxDynamicSharedMemorySize,
+                                                       static_cast<int>(smem_bytes)));
                         kernel<<<static_cast<unsigned int>(M), block_threads, smem_bytes, stream>>>(
                             typed_input, reinterpret_cast<int8_t*>(output),
                             reinterpret_cast<float*>(scales), static_cast<int>(K), seed);
@@ -2551,8 +2181,8 @@ extern "C"
                                 if (stochastic)
                                 {
                                         launch(quantize_int4_rowwise_convrot64_kernel<
-                                                   __hip_bfloat16, block_threads_single, false, true,
-                                                   true>,
+                                                   __hip_bfloat16, block_threads_single, false,
+                                                   true, true>,
                                                typed_input, block_threads_single, 2);
                                 }
                                 else
@@ -2592,8 +2222,8 @@ extern "C"
                                 else
                                 {
                                         launch(quantize_int4_rowwise_convrot64_kernel<
-                                                   __hip_bfloat16, block_threads_multi, false, false,
-                                                   true>,
+                                                   __hip_bfloat16, block_threads_multi, false,
+                                                   false, true>,
                                                typed_input, block_threads_multi, 2);
                                 }
                         }
@@ -2769,8 +2399,8 @@ extern "C"
 
                         if (output_dtype_code == 2)
                         {
-                                const size_t smem_bytes =
-                                    groups_per_block * 2 * small_group_size * sizeof(__hip_bfloat16);
+                                const size_t smem_bytes = groups_per_block * 2 * small_group_size *
+                                                          sizeof(__hip_bfloat16);
                                 if (check_bounds)
                                 {
                                         if (scale_per_row)
@@ -3298,6 +2928,55 @@ extern "C"
                 }
         }
 
+        //         void launch_int4_linear_kernel(const void* act, const void* weight, const void*
+        //         x_scales,
+        //                                        const void* weight_scales, const void* bias, void*
+        //                                        output, int64_t M, int64_t N, int64_t K, bool
+        //                                        has_bias, int output_dtype_code, int
+        //                                        bias_dtype_code, hipStream_t stream)
+        //         {
+        //                 if (K % comfy::svdquant::kGroupSize != 0) return;
+        //                 const dim3 grid(static_cast<unsigned int>((N + kBlockN - 1) / kBlockN),
+        //                                 static_cast<unsigned int>((M + kBlockM - 1) / kBlockM));
+        //                 const dim3 block(kThreadsPerBlock);
+        //
+        // #define DISPATCH_OUT_BIAS(OutType, BiasType) \
+        //         int4_linear_kernel<OutType, BiasType><<<grid, block, 0, stream>>>( \
+        //             reinterpret_cast<const int8_t*>(act), reinterpret_cast<const
+        //             int8_t*>(weight), \
+        //             reinterpret_cast<const float*>(x_scales), \
+        //             reinterpret_cast<const float*>(weight_scales), \
+        //             reinterpret_cast<const BiasType*>(bias), reinterpret_cast<OutType*>(output),
+        //             \ static_cast<int>(M), static_cast<int>(N), static_cast<int>(K), has_bias)
+        //
+        // #define DISPATCH_BIAS(OutType)                                      \
+        //         do                                                          \
+        //         {                                                           \
+        //                 if (bias_dtype_code == 2)                           \
+        //                         DISPATCH_OUT_BIAS(OutType, __hip_bfloat16); \
+        //                 else if (bias_dtype_code == 1)                      \
+        //                         DISPATCH_OUT_BIAS(OutType, __half);         \
+        //                 else                                                \
+        //                         DISPATCH_OUT_BIAS(OutType, float);          \
+        //         } while (0)
+        //
+        //                 if (output_dtype_code == 2)
+        //                 {
+        //                         DISPATCH_BIAS(__hip_bfloat16);
+        //                 }
+        //                 else if (output_dtype_code == 1)
+        //                 {
+        //                         DISPATCH_BIAS(__half);
+        //                 }
+        //                 else
+        //                 {
+        //                         DISPATCH_BIAS(float);
+        //                 }
+        //
+        // #undef DISPATCH_BIAS
+        // #undef DISPATCH_OUT_BIAS
+        //         }
+
         void launch_int4_linear_kernel(const void* act, const void* weight, const void* x_scales,
                                        const void* weight_scales, const void* bias, void* output,
                                        int64_t M, int64_t N, int64_t K, bool has_bias,
@@ -3305,9 +2984,14 @@ extern "C"
                                        hipStream_t stream)
         {
                 if (K % comfy::svdquant::kGroupSize != 0) return;
+
+                constexpr int kBlockM = 32;
+                constexpr int kBlockN = 128;
+                constexpr int kNumWarps = 8;
+
                 const dim3 grid(static_cast<unsigned int>((N + kBlockN - 1) / kBlockN),
                                 static_cast<unsigned int>((M + kBlockM - 1) / kBlockM));
-                const dim3 block(kThreadsPerBlock);
+                const dim3 block(kNumWarps * 32);
 
 #define DISPATCH_OUT_BIAS(OutType, BiasType)                                               \
         int4_linear_kernel<OutType, BiasType><<<grid, block, 0, stream>>>(                 \
@@ -3317,15 +3001,15 @@ extern "C"
             reinterpret_cast<const BiasType*>(bias), reinterpret_cast<OutType*>(output),   \
             static_cast<int>(M), static_cast<int>(N), static_cast<int>(K), has_bias)
 
-#define DISPATCH_BIAS(OutType)                                     \
-        do                                                         \
-        {                                                          \
-                if (bias_dtype_code == 2)                          \
+#define DISPATCH_BIAS(OutType)                                      \
+        do                                                          \
+        {                                                           \
+                if (bias_dtype_code == 2)                           \
                         DISPATCH_OUT_BIAS(OutType, __hip_bfloat16); \
-                else if (bias_dtype_code == 1)                     \
-                        DISPATCH_OUT_BIAS(OutType, __half);        \
-                else                                               \
-                        DISPATCH_OUT_BIAS(OutType, float);         \
+                else if (bias_dtype_code == 1)                      \
+                        DISPATCH_OUT_BIAS(OutType, __half);         \
+                else                                                \
+                        DISPATCH_OUT_BIAS(OutType, float);          \
         } while (0)
 
                 if (output_dtype_code == 2)
@@ -3344,7 +3028,6 @@ extern "C"
 #undef DISPATCH_BIAS
 #undef DISPATCH_OUT_BIAS
         }
-
         void launch_unpack_int4_to_int8_kernel(const void* input, void* output, int64_t rows,
                                                int64_t K_half, hipStream_t stream)
         {
@@ -3494,26 +3177,17 @@ extern "C"
                                                      : nullptr;
                         void* chunk_output = static_cast<char*>(output) +
                                              n0 * fp_dtype_size_bytes(output_dtype_code);
-                        // const bool used_cutlass = (
-                        //     num_rows >= 1024
-                        //     && (cols >= 4096 || (num_cols == 2560 && cols == 2560))
-                        //     && weight_scale_size != 1
-                        //     && (!has_bias || bias_dtype_code == 0)
-                        //     && launch_cutlass_int8_dequant_strided(
-                        //         input,
-                        //         weight_workspace,
-                        //         x_scales,
-                        //         chunk_weight_scales,
-                        //         chunk_bias,
-                        //         chunk_output,
-                        //         num_rows,
-                        //         cols,
-                        //         K,
-                        //         num_cols,
-                        //         output_dtype_code,
-                        //         stream));
-                        // if (used_cutlass) {
-                        //     continue;
+                        // const bool used_cutlass =
+                        //     (num_rows >= 1024 &&
+                        //      (cols >= 4096 || (num_cols == 2560 && cols == 2560)) &&
+                        //      weight_scale_size != 1 && (!has_bias || bias_dtype_code == 0) &&
+                        //      launch_cutlass_int8_dequant_strided(
+                        //          input, weight_workspace, x_scales, chunk_weight_scales,
+                        //          chunk_bias, chunk_output, num_rows, cols, K, num_cols,
+                        //          output_dtype_code, stream));
+                        // if (used_cutlass)
+                        // {
+                        //         continue;
                         // }
 
                         launch_cublas_gemm_int8_kernel(input, weight_workspace, acc_workspace,
@@ -3572,49 +3246,5 @@ extern "C"
                             hipGetErrorString(err));
                 }
         }
-
-        // bool launch_cutlass_int4_dequant(
-        //     const void* A,
-        //     const void* B,
-        //     const void* xs,
-        //     const void* ws,
-        //     const void* bias,
-        //     void* D,
-        //     int64_t M,
-        //     int64_t N,
-        //     int64_t K,
-        //     int out_dtype_code,
-        //     cudaStream_t stream)
-        // {
-        // #ifdef COMFY_HAVE_CUTLASS
-        //     if (M == 0 || N == 0 || K == 0) return true;
-        //     if (K % comfy::svdquant::kGroupSize != 0) return false;
-        //     const int8_t* a = static_cast<const int8_t*>(A);
-        //     const int8_t* b = static_cast<const int8_t*>(B);
-        //     const float* x = static_cast<const float*>(xs);
-        //     const float* w = static_cast<const float*>(ws);
-        //     const float* bs = static_cast<const float*>(bias);
-        //     if (bs == nullptr) {
-        //         switch (out_dtype_code) {
-        //             case 0: return dispatch_fused_int4_no_bias<float>(a, b, x, w,
-        //             static_cast<float*>(D), M, N, K, stream); case 1: return
-        //             dispatch_fused_int4_no_bias<cutlass::half_t>(a, b, x, w,
-        //             static_cast<cutlass::half_t*>(D), M, N, K, stream); case 2: return
-        //             dispatch_fused_int4_no_bias<cutlass::bfloat16_t>(a, b, x, w,
-        //             static_cast<cutlass::bfloat16_t*>(D), M, N, K, stream); default: return
-        //             false;
-        //         }
-        //     }
-        //     switch (out_dtype_code) {
-        //         case 0: return dispatch_fused_int4<float>(a, b, x, w, bs, static_cast<float*>(D),
-        //         M, N, K, stream); case 1: return dispatch_fused_int4<cutlass::half_t>(a, b, x, w,
-        //         bs, static_cast<cutlass::half_t*>(D), M, N, K, stream); case 2: return
-        //         dispatch_fused_int4<cutlass::bfloat16_t>(a, b, x, w, bs,
-        //         static_cast<cutlass::bfloat16_t*>(D), M, N, K, stream); default: return false;
-        //     }
-        // #else
-        //     return false;
-        // #endif
-        //}
 
 }  // extern "C"

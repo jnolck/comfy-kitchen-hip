@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
- * All rights reserved. SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,8 +25,7 @@
 namespace nb = nanobind;
 
 // Helper: Map nanobind dtype to internal dtype code
-// Returns: 0=float32, 1=float16, 2=bfloat16, 3=uint8, 4=int8, 5=float8_e4m3fn,
-// 6=float8_e5m2
+// Returns: 0=float32, 1=float16, 2=bfloat16, 3=uint8, 4=int8, 5=float8_e4m3fn, 6=float8_e5m2
 int map_dtype_to_code(const nb::dlpack::dtype& dtype)
 {
         if (dtype.code == (uint8_t)nb::dlpack::dtype_code::Float)
@@ -66,12 +65,11 @@ extern "C"
                                                 int input_dtype_code, int output_dtype_code,
                                                 hipStream_t stream);
 
-        // void launch_cublas_gemm_blockwise_fp4_kernel(
-        //     const void *B_ptr, const void *B_decode_scale_ptr, const void *A_ptr,
-        //     const void *A_decode_scale_ptr, void *D_ptr, const void *bias_ptr,
-        //     int64_t M, int64_t N, int64_t K, const float *alpha_device_ptr,
-        //     int out_dtype_code, void *workspace_ptr, bool accumulate,
-        //     hipStream_t stream);
+        void launch_cublas_gemm_blockwise_fp4_kernel(
+            const void* B_ptr, const void* B_decode_scale_ptr, const void* A_ptr,
+            const void* A_decode_scale_ptr, void* D_ptr, const void* bias_ptr, int64_t M, int64_t N,
+            int64_t K, const float* alpha_device_ptr, int out_dtype_code, void* workspace_ptr,
+            bool accumulate, hipStream_t stream);
 
         void launch_apply_rope_kernel(
             const void* xq, const void* xk, const void* freqs, void* xq_out, void* xk_out,
@@ -92,33 +90,31 @@ extern "C"
                                             int64_t num_rows, int64_t num_cols,
                                             int output_dtype_code, bool hi_first,
                                             hipStream_t stream);
-        //
-        // void launch_quantize_mxfp8_kernel(const void *input, void *output,
-        //                                   void *block_scales, int64_t num_rows,
-        //                                   int64_t num_cols, int64_t orig_rows,
+
+        // void launch_quantize_mxfp8_kernel(const void* input, void* output, void* block_scales,
+        //                                   int64_t num_rows, int64_t num_cols, int64_t orig_rows,
         //                                   int64_t orig_cols, int input_dtype_code,
         //                                   hipStream_t stream);
+
+        // SVDQuant W4A4 — see ops/quantize_svdquant_w4a4.cu
+        // void launch_svdquant_quantize_w4a4_kernel(const void* x, const void* smooth,
+        //                                           const void* lora_down, void* q_x, void*
+        //                                           ascales, void* lora_act, int M, int M_pad, int
+        //                                           K, int R, int input_dtype_code, int
+        //                                           act_unsigned, hipStream_t stream);
         //
-        // // SVDQuant W4A4 — see ops/quantize_svdquant_w4a4.cu
-        // void launch_svdquant_quantize_w4a4_kernel(
-        //     const void *x, const void *smooth, const void *lora_down, void *q_x,
-        //     void *ascales, void *lora_act, int M, int M_pad, int K, int R,
-        //     int input_dtype_code, int act_unsigned, hipStream_t stream);
-        //
-        // // SVDQuant W4A4 — see ops/scaled_mm_svdquant_w4a4.cu
+        // SVDQuant W4A4 — see ops/scaled_mm_svdquant_w4a4.cu
         // void launch_svdquant_scaled_mm_w4a4_kernel(
-        //     const void *act, const void *wgt, const void *ascales, const void
-        //     *wscales, const void *lora_act_in, const void *lora_up, const void *bias,
-        //     void *out, int M, int N, int K, int R, int act_unsigned, int
-        //     out_dtype_code, int tile_packed, int fast_accum, int shared_scale, int
-        //     fuse_lora, hipStream_t stream);
-        //
-        // // AWQ W4A16 — see ops/awq_w4a16.cu. Internal M-routing picks
-        // // gemv (M ≤ 8) vs gemm path; bias / LoRA-up are applied externally.
-        // void launch_awq_w4a16_kernel(const void *x, const void *qweight,
-        //                              const void *wscales, const void *wzeros, void
-        //                              *out, int M, int N, int K, int G, int
-        //                              dtype_code, hipStream_t stream);
+        //     const void* act, const void* wgt, const void* ascales, const void* wscales,
+        //     const void* lora_act_in, const void* lora_up, const void* bias, void* out, int M, int
+        //     N, int K, int R, int act_unsigned, int out_dtype_code, int tile_packed, int
+        //     fast_accum, int shared_scale, int fuse_lora, hipStream_t stream);
+
+        // AWQ W4A16 — see ops/awq_w4a16.cu. Internal M-routing picks
+        // gemv (M ≤ 8) vs gemm path; bias / LoRA-up are applied externally.
+        void launch_awq_w4a16_kernel(const void* x, const void* qweight, const void* wscales,
+                                     const void* wzeros, void* out, int M, int N, int K, int G,
+                                     int dtype_code, hipStream_t stream);
 
         // Fused AdaLN — see ops/adaln.cu.
         void launch_adaln_kernel(const void* x, const void* scale, const void* shift, void* out,
@@ -159,16 +155,15 @@ void dequantize_per_tensor_fp8(nb::ndarray<nb::device::rocm> input,
         if (input_dtype_code != 5 && input_dtype_code != 6)
         {
                 throw std::runtime_error(
-                    "Unsupported input dtype code for "
-                    "dequantize_per_tensor_fp8 (must be 5 or 6)");
+                    "Unsupported input dtype code for dequantize_per_tensor_fp8 (must be 5 or 6)");
         }
 
         // Validate output dtype code (0=float32, 1=float16, 2=bfloat16)
         if (output_dtype_code < 0 || output_dtype_code > 2)
         {
                 throw std::runtime_error(
-                    "Unsupported output dtype for dequantize_per_tensor_fp8 (must be "
-                    "float32, float16, or bfloat16)");
+                    "Unsupported output dtype for dequantize_per_tensor_fp8 (must be float32, "
+                    "float16, or bfloat16)");
         }
 
         hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
@@ -204,54 +199,53 @@ void stochastic_round_fp8(nb::ndarray<nb::device::rocm> rng_and_output,
 }
 
 // Nanobind wrapper for cublas_gemm_blockwise_fp4
-// void cublas_gemm_blockwise_fp4(
-//     nb::ndarray<uint8_t, nb::ndim<2>, nb::device::rocm> b,
-//     nb::ndarray<uint8_t, nb::ndim<2>, nb::device::rocm> block_scale_b,
-//     nb::ndarray<uint8_t, nb::ndim<2>, nb::device::rocm> a,
-//     nb::ndarray<uint8_t, nb::ndim<2>, nb::device::rocm> block_scale_a,
-//     nb::ndarray<nb::device::rocm> out, int out_dtype_code,
-//     nb::ndarray<nb::device::rocm> bias, nb::ndarray<nb::device::rocm>
-//     workspace, bool accumulate, nb::ndarray<float, nb::device::rocm> alpha,
-//     uintptr_t stream_ptr) {
-//
-//   auto &runtime = comfy::HipblasLtRuntime::instance();
-//   if (!runtime.is_available()) {
-//     throw std::runtime_error("cuBLASLt not available: " +
-//                              runtime.error_message());
-//   }
-//
-//   // Get dimensions: B is (N, K_b), A is (M, K_a) in packed format
-//   int64_t N = b.shape(0);
-//   int64_t K_b = b.shape(1);
-//   int64_t M = a.shape(0);
-//   int64_t K_a = a.shape(1);
-//
-//   if (K_a != K_b) {
-//     throw std::runtime_error("Matrix dimensions do not match");
-//   }
-//
-//   // K is the number of FP4 elements (2 per uint8)
-//   int64_t K = 2 * K_a;
-//
-//   // Validate output dtype code (0=float32, 1=float16, 2=bfloat16)
-//   if (out_dtype_code < 0 || out_dtype_code > 2) {
-//     throw std::runtime_error("Invalid output dtype code");
-//   }
-//
-//   hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
-//
-//   // Handle optional bias (check if pointer is null or size is 0)
-//   const void *bias_ptr =
-//       (bias.data() && bias.size() > 0) ? bias.data() : nullptr;
-//
-//   // Call the kernel
-//   launch_cublas_gemm_blockwise_fp4_kernel(
-//       b.data(), block_scale_b.data(), a.data(), block_scale_a.data(),
-//       out.data(), bias_ptr, M, N, K, static_cast<const float
-//       *>(alpha.data()), out_dtype_code, workspace.data(), accumulate,
-//       stream);
-// }
-//
+void cublas_gemm_blockwise_fp4(nb::ndarray<uint8_t, nb::ndim<2>, nb::device::rocm> b,
+                               nb::ndarray<uint8_t, nb::ndim<2>, nb::device::rocm> block_scale_b,
+                               nb::ndarray<uint8_t, nb::ndim<2>, nb::device::rocm> a,
+                               nb::ndarray<uint8_t, nb::ndim<2>, nb::device::rocm> block_scale_a,
+                               nb::ndarray<nb::device::rocm> out, int out_dtype_code,
+                               nb::ndarray<nb::device::rocm> bias,
+                               nb::ndarray<nb::device::rocm> workspace, bool accumulate,
+                               nb::ndarray<float, nb::device::rocm> alpha, uintptr_t stream_ptr)
+{
+        auto& runtime = comfy::HipblasLtRuntime::instance();
+        if (!runtime.is_available())
+        {
+                throw std::runtime_error("cuBLASLt not available: " + runtime.error_message());
+        }
+
+        // Get dimensions: B is (N, K_b), A is (M, K_a) in packed format
+        int64_t N = b.shape(0);
+        int64_t K_b = b.shape(1);
+        int64_t M = a.shape(0);
+        int64_t K_a = a.shape(1);
+
+        if (K_a != K_b)
+        {
+                throw std::runtime_error("Matrix dimensions do not match");
+        }
+
+        // K is the number of FP4 elements (2 per uint8)
+        int64_t K = 2 * K_a;
+
+        // Validate output dtype code (0=float32, 1=float16, 2=bfloat16)
+        if (out_dtype_code < 0 || out_dtype_code > 2)
+        {
+                throw std::runtime_error("Invalid output dtype code");
+        }
+
+        hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+
+        // Handle optional bias (check if pointer is null or size is 0)
+        const void* bias_ptr = (bias.data() && bias.size() > 0) ? bias.data() : nullptr;
+
+        // Call the kernel
+        launch_cublas_gemm_blockwise_fp4_kernel(
+            b.data(), block_scale_b.data(), a.data(), block_scale_a.data(), out.data(), bias_ptr, M,
+            N, K, static_cast<const float*>(alpha.data()), out_dtype_code, workspace.data(),
+            accumulate, stream);
+}
+
 // Nanobind wrapper for quantize_nvfp4
 void quantize_nvfp4(nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
                     nb::ndarray<nb::device::rocm> global_scale,
@@ -279,8 +273,8 @@ void quantize_nvfp4(nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
         if (input_dtype_code < 0 || input_dtype_code > 2)
         {
                 throw std::runtime_error(
-                    "Unsupported input dtype for FP4 quantization "
-                    "(must be float32, float16, or bfloat16)");
+                    "Unsupported input dtype for FP4 quantization (must be float32, float16, or "
+                    "bfloat16)");
         }
 
         hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
@@ -304,8 +298,8 @@ void dequantize_nvfp4(nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
         if (output_dtype_code < 0 || output_dtype_code > 2)
         {
                 throw std::runtime_error(
-                    "Unsupported output dtype for FP4 dequantization"
-                    "(must be float32, float16, or bfloat16)");
+                    "Unsupported output dtype for FP4 dequantization (must be float32, float16, or "
+                    "bfloat16)");
         }
 
         hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
@@ -314,39 +308,39 @@ void dequantize_nvfp4(nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
                                        hi_first, stream);
 }
 
-// Nanobind wrapper for quantize_mxfp8
+// // Nanobind wrapper for quantize_mxfp8
 // void quantize_mxfp8(nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
 //                     nb::ndarray<nb::device::rocm> output,
-//                     nb::ndarray<nb::device::rocm> block_scales, bool pad_32x,
-//                     uintptr_t stream_ptr) {
+//                     nb::ndarray<nb::device::rocm> block_scales, bool pad_32x, uintptr_t
+//                     stream_ptr)
+// {
+//         // Get input dimensions (orig_rows, orig_cols)
+//         int64_t orig_rows = input.shape(0);
+//         int64_t orig_cols = input.shape(1);
 //
-//   // Get input dimensions (orig_rows, orig_cols)
-//   int64_t orig_rows = input.shape(0);
-//   int64_t orig_cols = input.shape(1);
+//         // Calculate effective padded dimensions
+//         int64_t num_rows = orig_rows;
+//         int64_t num_cols = orig_cols;
 //
-//   // Calculate effective padded dimensions
-//   int64_t num_rows = orig_rows;
-//   int64_t num_cols = orig_cols;
+//         if (pad_32x)
+//         {
+//                 // Round up to nearest multiple of 32
+//                 num_rows = (orig_rows + 31) / 32 * 32;
+//                 num_cols = (orig_cols + 31) / 32 * 32;
+//         }
 //
-//   if (pad_32x) {
-//     // Round up to nearest multiple of 32
-//     num_rows = (orig_rows + 31) / 32 * 32;
-//     num_cols = (orig_cols + 31) / 32 * 32;
-//   }
+//         // Get input dtype code
+//         int input_dtype_code = map_dtype_to_code(input.dtype());
+//         if (input_dtype_code < 0 || input_dtype_code > 2)
+//         {
+//                 throw std::runtime_error(
+//                     "Unsupported input dtype for MXFP8 quantization (must be float32, float16, or
+//                     " "bfloat16)");
+//         }
 //
-//   // Get input dtype code
-//   int input_dtype_code = map_dtype_to_code(input.dtype());
-//   if (input_dtype_code < 0 || input_dtype_code > 2) {
-//     throw std::runtime_error("Unsupported input dtype for MXFP8 quantization
-//     "
-//                              "(must be float32, float16, or bfloat16)");
-//   }
-//
-//   hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
-//   launch_quantize_mxfp8_kernel(input.data(), output.data(),
-//   block_scales.data(),
-//                                num_rows, num_cols, orig_rows, orig_cols,
-//                                input_dtype_code, stream);
+//         hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+//         launch_quantize_mxfp8_kernel(input.data(), output.data(), block_scales.data(), num_rows,
+//                                      num_cols, orig_rows, orig_cols, input_dtype_code, stream);
 // }
 
 // Nanobind wrapper for apply_rope (handles both single tensor and q/k pair)
@@ -453,111 +447,109 @@ void apply_rope(nb::ndarray<nb::device::rocm> xq, nb::ndarray<nb::device::rocm> 
 // SVDQuant W4A4 — nanobind/DLPack bindings for the native kitchen int4 kernels
 // (see ops/quantize_svdquant_w4a4.cu and ops/scaled_mm_svdquant_w4a4.cu).
 // ---------------------------------------------------------------------------
-
-// static int svdquant_dtype_code(const nb::dlpack::dtype &dt) {
-//   int c = map_dtype_to_code(dt);
-//   if (c < 0)
-//     throw std::runtime_error("svdquant: unsupported dtype");
-//   return c;
+//
+// static int svdquant_dtype_code(const nb::dlpack::dtype& dt)
+// {
+//         int c = map_dtype_to_code(dt);
+//         if (c < 0) throw std::runtime_error("svdquant: unsupported dtype");
+//         return c;
 // }
 //
 // void svdquant_quantize_w4a4(
-//     nb::ndarray<nb::device::rocm>
-//         x, // (M, K) bf16/fp16 — pre-shifted if unsigned path
-//     nb::ndarray<nb::device::rocm> smooth,    // (K,)
-//     nb::ndarray<nb::device::rocm> lora_down, // (K, R)
-//     nb::ndarray<nb::device::rocm> q_x,       // (M_pad, K/2) int8
-//     nb::ndarray<nb::device::rocm> ascales,   // (K/G, M_pad)
-//     nb::ndarray<nb::device::rocm> lora_act,  // (M_pad, R) fp32
-//     bool act_unsigned, uintptr_t stream_ptr) {
-//   int M = static_cast<int>(x.shape(0));
-//   int K = static_cast<int>(x.shape(1));
-//   int M_pad = static_cast<int>(q_x.shape(0));
-//   int R = static_cast<int>(lora_down.shape(1));
-//   int input_code = svdquant_dtype_code(x.dtype());
+//     nb::ndarray<nb::device::rocm> x,          // (M, K) bf16/fp16 — pre-shifted if unsigned path
+//     nb::ndarray<nb::device::rocm> smooth,     // (K,)
+//     nb::ndarray<nb::device::rocm> lora_down,  // (K, R)
+//     nb::ndarray<nb::device::rocm> q_x,        // (M_pad, K/2) int8
+//     nb::ndarray<nb::device::rocm> ascales,    // (K/G, M_pad)
+//     nb::ndarray<nb::device::rocm> lora_act,   // (M_pad, R) fp32
+//     bool act_unsigned, uintptr_t stream_ptr)
+// {
+//         int M = static_cast<int>(x.shape(0));
+//         int K = static_cast<int>(x.shape(1));
+//         int M_pad = static_cast<int>(q_x.shape(0));
+//         int R = static_cast<int>(lora_down.shape(1));
+//         int input_code = svdquant_dtype_code(x.dtype());
 //
-//   hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
-//   launch_svdquant_quantize_w4a4_kernel(
-//       x.data(), smooth.data(), lora_down.data(), q_x.data(), ascales.data(),
-//       lora_act.data(), M, M_pad, K, R, input_code,
-//       static_cast<int>(act_unsigned), stream);
+//         hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+//         launch_svdquant_quantize_w4a4_kernel(x.data(), smooth.data(), lora_down.data(),
+//         q_x.data(),
+//                                              ascales.data(), lora_act.data(), M, M_pad, K, R,
+//                                              input_code, static_cast<int>(act_unsigned), stream);
 // }
 //
-// void svdquant_scaled_mm_w4a4(
-//     nb::ndarray<nb::device::rocm> act,         // (M, K/2) int8
-//     nb::ndarray<nb::device::rocm> wgt,         // (N, K/2) int8
-//     nb::ndarray<nb::device::rocm> ascales,     // (K/G, M)
-//     nb::ndarray<nb::device::rocm> wscales,     // (K/G, N)
-//     nb::ndarray<nb::device::rocm> lora_act_in, // (M, R) fp32
-//     nb::ndarray<nb::device::rocm> lora_up,     // (N, R)
-//     nb::ndarray<nb::device::rocm> bias,        // (N,) or empty
-//     nb::ndarray<nb::device::rocm> out,         // (M, N)
-//     bool act_unsigned, bool fast_accum, bool shared_scale, bool fuse_lora,
-//     uintptr_t stream_ptr) {
-//   int M = static_cast<int>(act.shape(0));
-//   int K = static_cast<int>(act.shape(1)) * 2;
-//   const bool tile_packed = (wgt.ndim() == 4);
-//   int N = tile_packed ? static_cast<int>(wgt.shape(0)) * 128
-//                       : static_cast<int>(wgt.shape(0));
-//   int R = static_cast<int>(lora_act_in.shape(1));
-//   int out_code = svdquant_dtype_code(out.dtype());
-//   if (fuse_lora && svdquant_dtype_code(lora_act_in.dtype()) != out_code) {
-//     throw std::runtime_error(
-//         "svdquant_scaled_mm_w4a4: fused LoRA-up requires lora_act_in dtype "
-//         "to match output/lora_up dtype");
-//   }
+// void svdquant_scaled_mm_w4a4(nb::ndarray<nb::device::rocm> act,          // (M, K/2) int8
+//                              nb::ndarray<nb::device::rocm> wgt,          // (N, K/2) int8
+//                              nb::ndarray<nb::device::rocm> ascales,      // (K/G, M)
+//                              nb::ndarray<nb::device::rocm> wscales,      // (K/G, N)
+//                              nb::ndarray<nb::device::rocm> lora_act_in,  // (M, R) fp32
+//                              nb::ndarray<nb::device::rocm> lora_up,      // (N, R)
+//                              nb::ndarray<nb::device::rocm> bias,         // (N,) or empty
+//                              nb::ndarray<nb::device::rocm> out,          // (M, N)
+//                              bool act_unsigned, bool fast_accum, bool shared_scale, bool
+//                              fuse_lora, uintptr_t stream_ptr)
+// {
+//         int M = static_cast<int>(act.shape(0));
+//         int K = static_cast<int>(act.shape(1)) * 2;
+//         const bool tile_packed = (wgt.ndim() == 4);
+//         int N = tile_packed ? static_cast<int>(wgt.shape(0)) * 128 :
+//         static_cast<int>(wgt.shape(0)); int R = static_cast<int>(lora_act_in.shape(1)); int
+//         out_code = svdquant_dtype_code(out.dtype()); if (fuse_lora &&
+//         svdquant_dtype_code(lora_act_in.dtype()) != out_code)
+//         {
+//                 throw std::runtime_error(
+//                     "svdquant_scaled_mm_w4a4: fused LoRA-up requires lora_act_in dtype "
+//                     "to match output/lora_up dtype");
+//         }
 //
-//   if (tile_packed) {
-//     if (wgt.shape(1) != K / 64 || wgt.shape(2) != 32 || wgt.shape(3) != 128)
-//     {
-//       throw std::runtime_error(
-//           "svdquant_scaled_mm_w4a4: tile-packed weight must have shape "
-//           "(N/128, K/64, 32, 128)");
-//     }
-//     if (wscales.ndim() != 3 || wscales.shape(0) != wgt.shape(0) ||
-//         wscales.shape(1) != K / 64 || wscales.shape(2) != 128) {
-//       throw std::runtime_error(
-//           "svdquant_scaled_mm_w4a4: tile-packed wscales must have shape "
-//           "(N/128, K/64, 128)");
-//     }
-//   }
+//         if (tile_packed)
+//         {
+//                 if (wgt.shape(1) != K / 64 || wgt.shape(2) != 32 || wgt.shape(3) != 128)
+//                 {
+//                         throw std::runtime_error(
+//                             "svdquant_scaled_mm_w4a4: tile-packed weight must have shape "
+//                             "(N/128, K/64, 32, 128)");
+//                 }
+//                 if (wscales.ndim() != 3 || wscales.shape(0) != wgt.shape(0) ||
+//                     wscales.shape(1) != K / 64 || wscales.shape(2) != 128)
+//                 {
+//                         throw std::runtime_error(
+//                             "svdquant_scaled_mm_w4a4: tile-packed wscales must have shape "
+//                             "(N/128, K/64, 128)");
+//                 }
+//         }
 //
-//   const void *bias_ptr =
-//       (bias.data() != nullptr && bias.size() > 0) ? bias.data() : nullptr;
-//   hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
-//   launch_svdquant_scaled_mm_w4a4_kernel(
-//       act.data(), wgt.data(), ascales.data(), wscales.data(),
-//       lora_act_in.data(), lora_up.data(), bias_ptr, out.data(), M, N, K, R,
-//       static_cast<int>(act_unsigned), out_code,
-//       static_cast<int>(tile_packed), static_cast<int>(fast_accum),
-//       static_cast<int>(shared_scale), static_cast<int>(fuse_lora), stream);
+//         const void* bias_ptr = (bias.data() != nullptr && bias.size() > 0) ? bias.data() :
+//         nullptr; hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+//         launch_svdquant_scaled_mm_w4a4_kernel(
+//             act.data(), wgt.data(), ascales.data(), wscales.data(), lora_act_in.data(),
+//             lora_up.data(), bias_ptr, out.data(), M, N, K, R, static_cast<int>(act_unsigned),
+//             out_code, static_cast<int>(tile_packed), static_cast<int>(fast_accum),
+//             static_cast<int>(shared_scale), static_cast<int>(fuse_lora), stream);
 // }
 //
-// //
-// ---------------------------------------------------------------------------
-// // AWQ W4A16 — int4 weight, fp16/bf16 activation matmul. See
-// ops/awq_w4a16.cu.
-// //
-// ---------------------------------------------------------------------------
-// void awq_w4a16(
-//     nb::ndarray<nb::device::rocm> x,       // (M, K) bf16/fp16
-//     nb::ndarray<nb::device::rocm> qweight, // (N, K/2) int8 packed uint4
-//     nb::ndarray<nb::device::rocm> wscales, // (K/G, N)
-//     nb::ndarray<nb::device::rocm> wzeros,  // (K/G, N)
-//     nb::ndarray<nb::device::rocm> out,     // (M, N)
-//     int group_size, uintptr_t stream_ptr) {
-//   const int M = static_cast<int>(x.shape(0));
-//   const int K = static_cast<int>(x.shape(1));
-//   const int N = static_cast<int>(qweight.shape(0));
-//   const int dtype_code = svdquant_dtype_code(x.dtype());
-//   if (dtype_code != 1 && dtype_code != 2) {
-//     throw std::runtime_error(
-//         "awq_w4a16: only fp16 (1) and bf16 (2) activations supported");
-//   }
-//   hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
-//   launch_awq_w4a16_kernel(x.data(), qweight.data(), wscales.data(),
-//                           wzeros.data(), out.data(), M, N, K, group_size,
-//                           dtype_code, stream);
+// // ---------------------------------------------------------------------------
+// // AWQ W4A16 — int4 weight, fp16/bf16 activation matmul. See ops/awq_w4a16.cu.
+// // ---------------------------------------------------------------------------
+// void awq_w4a16(nb::ndarray<nb::device::rocm> x,        // (M, K) bf16/fp16
+//                nb::ndarray<nb::device::rocm> qweight,  // (N, K/2) int8 packed uint4
+//                nb::ndarray<nb::device::rocm> wscales,  // (K/G, N)
+//                nb::ndarray<nb::device::rocm> wzeros,   // (K/G, N)
+//                nb::ndarray<nb::device::rocm> out,      // (M, N)
+//                int group_size, uintptr_t stream_ptr)
+// {
+//         const int M = static_cast<int>(x.shape(0));
+//         const int K = static_cast<int>(x.shape(1));
+//         const int N = static_cast<int>(qweight.shape(0));
+//         const int dtype_code = svdquant_dtype_code(x.dtype());
+//         if (dtype_code != 1 && dtype_code != 2)
+//         {
+//                 throw std::runtime_error(
+//                     "awq_w4a16: only fp16 (1) and bf16 (2) activations supported");
+//         }
+//         hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+//         launch_awq_w4a16_kernel(x.data(), qweight.data(), wscales.data(), wzeros.data(),
+//         out.data(),
+//                                 M, N, K, group_size, dtype_code, stream);
 // }
 
 // Nanobind wrapper for fused AdaLN
@@ -583,10 +575,57 @@ extern "C"
                                                  int input_dtype_code, bool stochastic,
                                                  uint64_t seed, hipStream_t stream);
 
+        void launch_quantize_int4_rowwise_kernel(const void* input, void* output, void* scales,
+                                                 int64_t M, int64_t K, int input_dtype_code,
+                                                 bool stochastic, uint64_t seed,
+                                                 hipStream_t stream);
+
+        void launch_quantize_int4_rowwise_convrot64_kernel(const void* input, void* output,
+                                                           void* scales, int64_t M, int64_t K,
+                                                           int group_size, int input_dtype_code,
+                                                           bool stochastic, uint64_t seed,
+                                                           hipStream_t stream);
+
+        void launch_quantize_int4_rowwise_convrot64_to_int8_kernel(
+            const void* input, void* output, void* scales, int64_t M, int64_t K, int group_size,
+            int input_dtype_code, bool stochastic, uint64_t seed, hipStream_t stream);
+
+        void launch_dequantize_int4_convrot64_kernel(const void* input, const void* scales,
+                                                     void* output, int64_t M, int64_t K,
+                                                     int64_t scale_size, int group_size,
+                                                     int output_dtype_code, hipStream_t stream);
+
+        void launch_int4_linear_kernel(const void* act, const void* weight, const void* x_scales,
+                                       const void* weight_scales, const void* bias, void* output,
+                                       int64_t M, int64_t N, int64_t K, bool has_bias,
+                                       int output_dtype_code, int bias_dtype_code,
+                                       hipStream_t stream);
+
+        void launch_unpack_int4_to_int8_kernel(const void* input, void* output, int64_t rows,
+                                               int64_t K_half, hipStream_t stream);
+
+        void launch_int4_weight_int8_act_gemv_dequant_kernel(
+            const void* input, const void* weight, const void* x_scales, const void* weight_scales,
+            const void* bias, void* output, int64_t num_rows, int64_t num_cols, int64_t K,
+            int64_t weight_scale_size, bool has_bias, int output_dtype_code, int bias_dtype_code,
+            hipStream_t stream);
+
+        void launch_int4_weight_int8_act_gemm_dequant_chunked_kernel(
+            const void* input, const void* weight, const void* x_scales, const void* weight_scales,
+            const void* bias, void* output, void* weight_workspace, void* acc_workspace,
+            void* cublas_workspace, int64_t cublas_workspace_size, int64_t num_rows,
+            int64_t num_cols, int64_t K, int64_t weight_scale_size, int64_t chunk_cols,
+            bool has_bias, int output_dtype_code, int bias_dtype_code, hipStream_t stream);
+
         bool launch_cutlass_int8_dequant(const void* A, const void* B, const void* xs,
                                          const void* ws, const void* bias, void* D, int64_t M,
                                          int64_t N, int64_t K, int out_dtype_code,
                                          hipStream_t stream);
+
+        // bool launch_cutlass_int4_dequant(const void* A, const void* B, const void* xs,
+        //                                  const void* ws, const void* bias, void* D, int64_t M,
+        //                                  int64_t N, int64_t K, int out_dtype_code,
+        //                                  hipStream_t stream);
 
         void launch_quantize_int8_rowwise_convrot_kernel(const void* input, void* output,
                                                          void* scales, int64_t num_rows,
@@ -697,6 +736,356 @@ void quantize_int8_rowwise(nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
                                             input_dtype_code, stochastic, seed, stream);
 }
 
+void quantize_int4_rowwise(nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
+                           nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> output,
+                           nb::ndarray<float, nb::ndim<2>, nb::device::rocm> scales,
+                           bool stochastic, uint64_t seed, uintptr_t stream_ptr)
+{
+        const int64_t M = input.shape(0);
+        const int64_t K = input.shape(1);
+        if (K % 64 != 0)
+        {
+                throw std::runtime_error("INT4 rowwise quantization requires K divisible by 64");
+        }
+        if (output.shape(0) != M || output.shape(1) != K / 2)
+        {
+                throw std::runtime_error("INT4 rowwise quantization output shape mismatch");
+        }
+        if (scales.shape(0) != M || scales.shape(1) != 1)
+        {
+                throw std::runtime_error("INT4 rowwise quantization scale shape mismatch");
+        }
+        const int input_dtype_code = map_dtype_to_code(input.dtype());
+        if (input_dtype_code < 0 || input_dtype_code > 2)
+        {
+                throw std::runtime_error("Unsupported input dtype for INT4 rowwise quantization");
+        }
+
+        hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+        launch_quantize_int4_rowwise_kernel(input.data(), output.data(), scales.data(), M, K,
+                                            input_dtype_code, stochastic, seed, stream);
+}
+
+void quantize_int4_rowwise_convrot64(nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
+                                     nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> output,
+                                     nb::ndarray<float, nb::ndim<2>, nb::device::rocm> scales,
+                                     int group_size, bool stochastic, uint64_t seed,
+                                     uintptr_t stream_ptr)
+{
+        const int64_t M = input.shape(0);
+        const int64_t K = input.shape(1);
+        if (group_size != 16 && group_size != 64 && group_size != 256)
+        {
+                throw std::runtime_error(
+                    "INT4 ConvRot quantization requires group_size 16, 64, or 256");
+        }
+        if (K % group_size != 0)
+        {
+                throw std::runtime_error(
+                    "INT4 ConvRot quantization requires K divisible by group_size");
+        }
+        if (output.shape(0) != M || output.shape(1) != K / 2)
+        {
+                throw std::runtime_error("INT4 ConvRot quantization output shape mismatch");
+        }
+        if (scales.shape(0) != M || scales.shape(1) != 1)
+        {
+                throw std::runtime_error("INT4 ConvRot quantization scale shape mismatch");
+        }
+        const int input_dtype_code = map_dtype_to_code(input.dtype());
+        if (input_dtype_code < 0 || input_dtype_code > 2)
+        {
+                throw std::runtime_error("Unsupported input dtype for INT4 ConvRot quantization");
+        }
+
+        hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+        launch_quantize_int4_rowwise_convrot64_kernel(input.data(), output.data(), scales.data(), M,
+                                                      K, group_size, input_dtype_code, stochastic,
+                                                      seed, stream);
+}
+
+void quantize_int4_rowwise_convrot64_to_int8(
+    nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> output,
+    nb::ndarray<float, nb::ndim<2>, nb::device::rocm> scales, int group_size, bool stochastic,
+    uint64_t seed, uintptr_t stream_ptr)
+{
+        const int64_t M = input.shape(0);
+        const int64_t K = input.shape(1);
+        if (output.shape(0) != M || output.shape(1) != K)
+        {
+                throw std::runtime_error("INT4 ConvRot fallback activation output shape mismatch");
+        }
+        if (scales.shape(0) != M || scales.shape(1) != 1)
+        {
+                throw std::runtime_error(
+                    "INT4 ConvRot fallback activation scales must have shape [M, 1]");
+        }
+        if (group_size != 256 || K % group_size != 0)
+        {
+                throw std::runtime_error(
+                    "INT4 ConvRot fallback activation quantization requires group_size 256 and "
+                    "divisible K");
+        }
+        const int input_dtype_code = map_dtype_to_code(input.dtype());
+        if (input_dtype_code < 0 || input_dtype_code > 2)
+        {
+                throw std::runtime_error(
+                    "Unsupported input dtype for INT4 ConvRot fallback activation quantization");
+        }
+
+        hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+        launch_quantize_int4_rowwise_convrot64_to_int8_kernel(
+            input.data(), output.data(), scales.data(), M, K, static_cast<int>(group_size),
+            input_dtype_code, stochastic, seed, stream);
+}
+
+void dequantize_int4_convrot64(nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> input,
+                               nb::ndarray<float, nb::ndim<1>, nb::device::rocm> scales,
+                               nb::ndarray<nb::ndim<2>, nb::device::rocm> output, int group_size,
+                               uintptr_t stream_ptr)
+{
+        const int64_t M = input.shape(0);
+        const int64_t K = input.shape(1) * 2;
+        if (group_size != 16 && group_size != 64 && group_size != 256)
+        {
+                throw std::runtime_error(
+                    "INT4 ConvRot dequantization requires group_size 16, 64, or 256");
+        }
+        if (K % group_size != 0)
+        {
+                throw std::runtime_error(
+                    "INT4 ConvRot dequantization requires K divisible by group_size");
+        }
+        if (output.shape(0) != M || output.shape(1) != K)
+        {
+                throw std::runtime_error("INT4 ConvRot dequantization output shape mismatch");
+        }
+        if (scales.size() != 1 && scales.size() != static_cast<size_t>(M))
+        {
+                throw std::runtime_error(
+                    "INT4 ConvRot dequantization scale must be scalar or per-row");
+        }
+        const int output_dtype_code = map_dtype_to_code(output.dtype());
+        if (output_dtype_code < 0 || output_dtype_code > 2)
+        {
+                throw std::runtime_error(
+                    "Unsupported output dtype for INT4 ConvRot dequantization");
+        }
+
+        hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+        launch_dequantize_int4_convrot64_kernel(input.data(), scales.data(), output.data(), M, K,
+                                                static_cast<int64_t>(scales.size()), group_size,
+                                                output_dtype_code, stream);
+}
+
+void int4_linear(nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> act,
+                 nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> weight,
+                 nb::ndarray<float, nb::device::rocm> x_scales,
+                 nb::ndarray<float, nb::device::rocm> weight_scales,
+                 nb::ndarray<nb::device::rocm> bias,
+                 nb::ndarray<nb::ndim<2>, nb::device::rocm> output, int output_dtype_code,
+                 uintptr_t stream_ptr)
+{
+        const int64_t M = act.shape(0);
+        const int64_t K_half = act.shape(1);
+        const int64_t N = weight.shape(0);
+        if (weight.shape(1) != K_half)
+        {
+                throw std::runtime_error("INT4 linear K dimensions do not match");
+        }
+        const int64_t K = K_half * 2;
+        if (K % 64 != 0)
+        {
+                throw std::runtime_error("INT4 linear requires K divisible by 64");
+        }
+        if (x_scales.size() != static_cast<size_t>(M))
+        {
+                throw std::runtime_error("INT4 linear x_scales must have one value per row");
+        }
+        if (weight_scales.size() != static_cast<size_t>(N))
+        {
+                throw std::runtime_error(
+                    "INT4 linear weight_scales must have one value per output channel");
+        }
+        if (output.shape(0) != M || output.shape(1) != N)
+        {
+                throw std::runtime_error("INT4 linear output shape mismatch");
+        }
+        const int out_dtype = map_dtype_to_code(output.dtype());
+        if (out_dtype != output_dtype_code)
+        {
+                throw std::runtime_error("INT4 linear output dtype code mismatch");
+        }
+        if (output_dtype_code < 0 || output_dtype_code > 2)
+        {
+                throw std::runtime_error("Unsupported output dtype for INT4 linear");
+        }
+
+        const bool has_bias = bias.size() > 0;
+        int bias_dtype_code = output_dtype_code;
+        if (has_bias)
+        {
+                if (bias.size() != static_cast<size_t>(N))
+                {
+                        throw std::runtime_error("INT4 linear bias shape mismatch");
+                }
+                bias_dtype_code = map_dtype_to_code(bias.dtype());
+                if (bias_dtype_code < 0 || bias_dtype_code > 2)
+                {
+                        throw std::runtime_error("Unsupported bias dtype for INT4 linear");
+                }
+        }
+
+        hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+        launch_int4_linear_kernel(act.data(), weight.data(), x_scales.data(), weight_scales.data(),
+                                  has_bias ? bias.data() : nullptr, output.data(), M, N, K,
+                                  has_bias, output_dtype_code, bias_dtype_code, stream);
+}
+
+void unpack_int4_to_int8(nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> input,
+                         nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> output,
+                         uintptr_t stream_ptr)
+{
+        const int64_t rows = input.shape(0);
+        const int64_t K_half = input.shape(1);
+        if (output.shape(0) != rows || output.shape(1) != K_half * 2)
+        {
+                throw std::runtime_error("unpack_int4_to_int8 output shape mismatch");
+        }
+        hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+        launch_unpack_int4_to_int8_kernel(input.data(), output.data(), rows, K_half, stream);
+}
+
+void int4_weight_int8_act_gemv_dequant(nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> input,
+                                       nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> weight,
+                                       nb::ndarray<float, nb::ndim<2>, nb::device::rocm> x_scales,
+                                       nb::ndarray<float, nb::device::rocm> weight_scales,
+                                       nb::ndarray<nb::device::rocm> bias,
+                                       nb::ndarray<nb::ndim<2>, nb::device::rocm> output,
+                                       int output_dtype_code, uintptr_t stream_ptr)
+{
+        const int64_t M = input.shape(0);
+        const int64_t K = input.shape(1);
+        const int64_t N = weight.shape(0);
+        if (weight.shape(1) * 2 != K)
+        {
+                throw std::runtime_error("packed INT4 weight GEMV weight K mismatch");
+        }
+        if (x_scales.shape(0) != M || x_scales.shape(1) != 1)
+        {
+                throw std::runtime_error("packed INT4 weight GEMV activation scale shape mismatch");
+        }
+        if (output.shape(0) != M || output.shape(1) != N)
+        {
+                throw std::runtime_error("packed INT4 weight GEMV output shape mismatch");
+        }
+        if (output_dtype_code < 0 || output_dtype_code > 2)
+        {
+                throw std::runtime_error("Invalid packed INT4 weight GEMV output dtype code");
+        }
+
+        const bool has_bias = bias.data() && bias.size() > 0;
+        int bias_dtype_code = output_dtype_code;
+        if (has_bias)
+        {
+                if (bias.shape(0) != N)
+                {
+                        throw std::runtime_error("packed INT4 weight GEMV bias shape mismatch");
+                }
+                bias_dtype_code = map_dtype_to_code(bias.dtype());
+                if (bias_dtype_code < 0 || bias_dtype_code > 2)
+                {
+                        throw std::runtime_error(
+                            "Unsupported bias dtype for packed INT4 weight GEMV");
+                }
+        }
+
+        hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+        launch_int4_weight_int8_act_gemv_dequant_kernel(
+            input.data(), weight.data(), x_scales.data(), weight_scales.data(),
+            has_bias ? bias.data() : nullptr, output.data(), M, N, K,
+            static_cast<int64_t>(weight_scales.size()), has_bias, output_dtype_code,
+            bias_dtype_code, stream);
+}
+
+void int4_weight_int8_act_gemm_dequant_chunked(
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> input,
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> weight,
+    nb::ndarray<float, nb::ndim<2>, nb::device::rocm> x_scales,
+    nb::ndarray<float, nb::device::rocm> weight_scales, nb::ndarray<nb::device::rocm> bias,
+    nb::ndarray<nb::ndim<2>, nb::device::rocm> output,
+    nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> weight_workspace,
+    nb::ndarray<int32_t, nb::ndim<2>, nb::device::rocm> acc_workspace,
+    nb::ndarray<uint8_t, nb::device::rocm> cublas_workspace, int64_t chunk_cols,
+    int output_dtype_code, uintptr_t stream_ptr)
+{
+        const int64_t M = input.shape(0);
+        const int64_t K = input.shape(1);
+        const int64_t N = weight.shape(0);
+        const int64_t K_half = weight.shape(1);
+        if (K_half * 2 != K)
+        {
+                throw std::runtime_error("chunked INT4 weight GEMM weight K mismatch");
+        }
+        if (x_scales.shape(0) != M || x_scales.shape(1) != 1)
+        {
+                throw std::runtime_error(
+                    "chunked INT4 weight GEMM activation scale shape mismatch");
+        }
+        if (output.shape(0) != M || output.shape(1) != N)
+        {
+                throw std::runtime_error("chunked INT4 weight GEMM output shape mismatch");
+        }
+        if (chunk_cols <= 0 || chunk_cols > N)
+        {
+                throw std::runtime_error("chunked INT4 weight GEMM invalid chunk_cols");
+        }
+        if (weight_workspace.shape(0) < chunk_cols || weight_workspace.shape(1) != K)
+        {
+                throw std::runtime_error(
+                    "chunked INT4 weight GEMM weight workspace shape mismatch");
+        }
+        if (acc_workspace.shape(0) != M || acc_workspace.shape(1) < chunk_cols)
+        {
+                throw std::runtime_error(
+                    "chunked INT4 weight GEMM accumulator workspace shape mismatch");
+        }
+        if (weight_scales.size() != 1 && static_cast<int64_t>(weight_scales.size()) != N)
+        {
+                throw std::runtime_error("chunked INT4 weight GEMM weight scale shape mismatch");
+        }
+        if (output_dtype_code < 0 || output_dtype_code > 2)
+        {
+                throw std::runtime_error("Invalid chunked INT4 weight GEMM output dtype code");
+        }
+
+        const bool has_bias = bias.data() && bias.size() > 0;
+        int bias_dtype_code = output_dtype_code;
+        if (has_bias)
+        {
+                if (bias.shape(0) != N)
+                {
+                        throw std::runtime_error("chunked INT4 weight GEMM bias shape mismatch");
+                }
+                bias_dtype_code = map_dtype_to_code(bias.dtype());
+                if (bias_dtype_code < 0 || bias_dtype_code > 2)
+                {
+                        throw std::runtime_error(
+                            "Unsupported bias dtype for chunked INT4 weight GEMM");
+                }
+        }
+
+        hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+        launch_int4_weight_int8_act_gemm_dequant_chunked_kernel(
+            input.data(), weight.data(), x_scales.data(), weight_scales.data(),
+            has_bias ? bias.data() : nullptr, output.data(), weight_workspace.data(),
+            acc_workspace.data(), cublas_workspace.data(),
+            static_cast<int64_t>(cublas_workspace.size()), M, N, K,
+            static_cast<int64_t>(weight_scales.size()), chunk_cols, has_bias, output_dtype_code,
+            bias_dtype_code, stream);
+}
+
 // INT8 GEMM + fused dequant (D = acc * xs[m] * ws[n] + bias[n]) via CUTLASS.
 // Returns true on success; false means caller falls back to cuBLAS + dequant.
 bool cutlass_int8_dequant(nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> a,  // [M, K]
@@ -718,6 +1107,35 @@ bool cutlass_int8_dequant(nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> a, 
         return launch_cutlass_int8_dequant(a.data(), b.data(), xs.data(), ws.data(), bias_ptr,
                                            d.data(), M, N, K, out_dtype_code, stream);
 }
+
+// INT4 GEMM + fused dequant via CUTLASS. A and B are packed signed int4 in int8 storage.
+// Returns true on success; false means caller falls back to the hand-written int4 kernel.
+// bool cutlass_int4_dequant(nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> a,  // [M, K / 2]
+//                           nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> b,  // [N, K / 2]
+//                           nb::ndarray<float, nb::device::rocm> xs,       // [M] per-row act scale
+//                           nb::ndarray<float, nb::device::rocm> ws,       // [N] per-col weight
+//                           scale nb::ndarray<nb::device::rocm> bias,            // [N] float or
+//                           empty nb::ndarray<nb::ndim<2>, nb::device::rocm> d,  // [M, N] output
+//                           int out_dtype_code, uintptr_t stream_ptr)
+// {
+//         const int64_t M = a.shape(0);
+//         const int64_t K_half = a.shape(1);
+//         const int64_t N = b.shape(0);
+//         if (b.shape(1) != K_half) throw std::runtime_error("cutlass_int4_dequant: K mismatch");
+//         if (d.shape(0) != M || d.shape(1) != N)
+//                 throw std::runtime_error("cutlass_int4_dequant: D shape mismatch");
+//         if (xs.size() != static_cast<size_t>(M))
+//                 throw std::runtime_error("cutlass_int4_dequant: xs shape mismatch");
+//         if (ws.size() != static_cast<size_t>(N))
+//                 throw std::runtime_error("cutlass_int4_dequant: ws shape mismatch");
+//         const int64_t K = K_half * 2;
+//         if (K % 64 != 0)
+//                 throw std::runtime_error("cutlass_int4_dequant: K must be divisible by 64");
+//         hipStream_t stream = reinterpret_cast<hipStream_t>(stream_ptr);
+//         const void* bias_ptr = bias.size() > 0 ? bias.data() : nullptr;
+//         return launch_cutlass_int4_dequant(a.data(), b.data(), xs.data(), ws.data(), bias_ptr,
+//                                            d.data(), M, N, K, out_dtype_code, stream);
+// }
 
 void quantize_int8_rowwise_convrot(nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
                                    nb::ndarray<int8_t, nb::ndim<2>, nb::device::rocm> output,
@@ -985,8 +1403,7 @@ void int8_linear_m1(nb::ndarray<nb::ndim<2>, nb::device::rocm> input,
         if (convrot && (group_size != 256 || K % 256 != 0))
         {
                 throw std::runtime_error(
-                    "INT8 M=1 ConvRot linear requires group_size 256 "
-                    "and K divisible by 256");
+                    "INT8 M=1 ConvRot linear requires group_size 256 and K divisible by 256");
         }
 
         const int input_dtype_code = map_dtype_to_code(input.dtype());
@@ -1095,8 +1512,8 @@ void dequantize_int8_convrot_weight(nb::ndarray<int8_t, nb::ndim<2>, nb::device:
 NB_MODULE(_C, m)
 {
         m.doc() =
-            "comfy_kitchen CUDA kernels - nanobind + DLPack interface (NO "
-            "PyTorch C++ dependencies)";
+            "comfy_kitchen CUDA kernels - nanobind + DLPack interface (NO PyTorch C++ "
+            "dependencies)";
 
         m.def("quantize_per_tensor_fp8", &quantize_per_tensor_fp8,
               "Quantize to FP8 using nanobind ndarrays", nb::arg("input"), nb::arg("scale"),
@@ -1113,12 +1530,11 @@ NB_MODULE(_C, m)
               nb::arg("rng_and_output"), nb::arg("input"), nb::arg("output_dtype_code"),
               nb::arg("numel"), nb::arg("stream_ptr"));
 
-        // m.def("cublas_gemm_blockwise_fp4", &cublas_gemm_blockwise_fp4,
-        //       "cuBLAS FP4 GEMM with block-wise scaling", nb::arg("b"),
-        //       nb::arg("block_scale_b"), nb::arg("a"), nb::arg("block_scale_a"),
-        //       nb::arg("out"), nb::arg("out_dtype_code"), nb::arg("bias"),
-        //       nb::arg("workspace"), nb::arg("accumulate"), nb::arg("alpha"),
-        //       nb::arg("stream_ptr"));
+        m.def("cublas_gemm_blockwise_fp4", &cublas_gemm_blockwise_fp4,
+              "cuBLAS FP4 GEMM with block-wise scaling", nb::arg("b"), nb::arg("block_scale_b"),
+              nb::arg("a"), nb::arg("block_scale_a"), nb::arg("out"), nb::arg("out_dtype_code"),
+              nb::arg("bias"), nb::arg("workspace"), nb::arg("accumulate"), nb::arg("alpha"),
+              nb::arg("stream_ptr"));
 
         m.def("cublas_gemm_int8", &cublas_gemm_int8,
               "INT8 GEMM using cuBLASLt IMMA tensor cores (SM >= 7.5)", nb::arg("a"), nb::arg("b"),
@@ -1128,11 +1544,62 @@ NB_MODULE(_C, m)
               "Rowwise INT8 quantization for CUDA activations", nb::arg("input"), nb::arg("output"),
               nb::arg("scales"), nb::arg("stochastic"), nb::arg("seed"), nb::arg("stream_ptr"));
 
+        m.def("quantize_int4_rowwise", &quantize_int4_rowwise,
+              "Rowwise signed INT4 quantization for CUDA activations/weights", nb::arg("input"),
+              nb::arg("output"), nb::arg("scales"), nb::arg("stochastic"), nb::arg("seed"),
+              nb::arg("stream_ptr"));
+
+        m.def("quantize_int4_rowwise_convrot64", &quantize_int4_rowwise_convrot64,
+              "Fused regular ConvRot-256 activation rotation plus rowwise signed INT4 quantization",
+              nb::arg("input"), nb::arg("output"), nb::arg("scales"), nb::arg("group_size"),
+              nb::arg("stochastic"), nb::arg("seed"), nb::arg("stream_ptr"));
+
+        m.def("quantize_int4_rowwise_convrot64_to_int8", &quantize_int4_rowwise_convrot64_to_int8,
+              "Fused ConvRot-256 activation rotation plus rowwise INT4-scale quantization into "
+              "INT8 storage",
+              nb::arg("input"), nb::arg("output"), nb::arg("scales"), nb::arg("group_size"),
+              nb::arg("stochastic"), nb::arg("seed"), nb::arg("stream_ptr"));
+
+        m.def("dequantize_int4_convrot64", &dequantize_int4_convrot64,
+              "Fused packed signed INT4 dequantization plus regular ConvRot-256 inverse rotation",
+              nb::arg("input"), nb::arg("scales"), nb::arg("output"), nb::arg("group_size"),
+              nb::arg("stream_ptr"));
+
+        m.def("int4_linear", &int4_linear,
+              "Signed INT4 GEMM with rowwise x colwise dequantization, bias, and output cast",
+              nb::arg("act"), nb::arg("weight"), nb::arg("x_scales"), nb::arg("weight_scales"),
+              nb::arg("bias"), nb::arg("output"), nb::arg("output_dtype_code"),
+              nb::arg("stream_ptr"));
+
+        m.def("unpack_int4_to_int8", &unpack_int4_to_int8,
+              "Unpack row-major packed signed INT4 matrix to row-major INT8 matrix",
+              nb::arg("input"), nb::arg("output"), nb::arg("stream_ptr"));
+
+        m.def("int4_weight_int8_act_gemv_dequant", &int4_weight_int8_act_gemv_dequant,
+              "M=1 GEMV using INT8 activation and packed row-major INT4 weight with fused dequant",
+              nb::arg("input"), nb::arg("weight"), nb::arg("x_scales"), nb::arg("weight_scales"),
+              nb::arg("bias"), nb::arg("output"), nb::arg("output_dtype_code"),
+              nb::arg("stream_ptr"));
+
+        m.def("int4_weight_int8_act_gemm_dequant_chunked",
+              &int4_weight_int8_act_gemm_dequant_chunked,
+              "Chunked INT8 GEMM using INT8 activation and packed row-major INT4 weight with fused "
+              "dequant",
+              nb::arg("input"), nb::arg("weight"), nb::arg("x_scales"), nb::arg("weight_scales"),
+              nb::arg("bias"), nb::arg("output"), nb::arg("weight_workspace"),
+              nb::arg("acc_workspace"), nb::arg("cublas_workspace"), nb::arg("chunk_cols"),
+              nb::arg("output_dtype_code"), nb::arg("stream_ptr"));
+
         m.def("cutlass_int8_dequant", &cutlass_int8_dequant,
-              "INT8 GEMM + fused rowwise x colwise dequant + bias via CUTLASS; false "
-              "-> fall back to cuBLAS",
+              "INT8 GEMM + fused rowwise x colwise dequant + bias via CUTLASS; false -> fall back "
+              "to cuBLAS",
               nb::arg("a"), nb::arg("b"), nb::arg("xs"), nb::arg("ws"), nb::arg("bias"),
               nb::arg("d"), nb::arg("out_dtype_code"), nb::arg("stream_ptr"));
+
+        // m.def("cutlass_int4_dequant", &cutlass_int4_dequant,
+        //       "INT4 GEMM + fused rowwise x colwise dequant + bias via CUTLASS; false -> fall back
+        //       " "to hand kernel", nb::arg("a"), nb::arg("b"), nb::arg("xs"), nb::arg("ws"),
+        //       nb::arg("bias"), nb::arg("d"), nb::arg("out_dtype_code"), nb::arg("stream_ptr"));
 
         m.def("quantize_int8_rowwise_convrot", &quantize_int8_rowwise_convrot,
               "Fused ConvRot Hadamard rotation + rowwise INT8 quantization", nb::arg("input"),
@@ -1144,8 +1611,7 @@ NB_MODULE(_C, m)
               nb::arg("group_size"), nb::arg("stream_ptr"));
 
         m.def("quantize_int8_convrot_staged", &quantize_int8_convrot_staged,
-              "ConvRot rotation with partial absmax followed by INT8 rowwise "
-              "quantization",
+              "ConvRot rotation with partial absmax followed by INT8 rowwise quantization",
               nb::arg("input"), nb::arg("rotated"), nb::arg("partial_absmax"), nb::arg("output"),
               nb::arg("scales"), nb::arg("group_size"), nb::arg("stochastic"), nb::arg("seed"),
               nb::arg("stream_ptr"));
@@ -1161,8 +1627,7 @@ NB_MODULE(_C, m)
               nb::arg("output_dtype_code"), nb::arg("stream_ptr"));
 
         m.def("int8_gemv_dequant", &int8_gemv_dequant,
-              "INT8 GEMV with fused rowwise x colwise dequantization, bias, and "
-              "output cast",
+              "INT8 GEMV with fused rowwise x colwise dequantization, bias, and output cast",
               nb::arg("input"), nb::arg("weight"), nb::arg("x_scales"), nb::arg("weight_scales"),
               nb::arg("bias"), nb::arg("output"), nb::arg("output_dtype_code"),
               nb::arg("stream_ptr"));
@@ -1194,41 +1659,35 @@ NB_MODULE(_C, m)
               nb::arg("stream_ptr"));
 
         m.def("dequantize_nvfp4", &dequantize_nvfp4,
-              "Dequantize from FP4 E2M1 with E4M3 block scales using cuBLAS tiled "
-              "layout",
+              "Dequantize from FP4 E2M1 with E4M3 block scales using cuBLAS tiled layout",
               nb::arg("input"), nb::arg("global_scale"), nb::arg("block_scales"), nb::arg("output"),
               nb::arg("output_dtype_code"), nb::arg("hi_first") = true, nb::arg("stream_ptr"));
 
         // m.def("quantize_mxfp8", &quantize_mxfp8,
-        //       "Quantize to FP8 E4M3 with E8M0 block scales using cuBLAS tiled
-        //       layout", nb::arg("input"), nb::arg("output"),
-        //       nb::arg("block_scales"), nb::arg("pad_32x") = false,
+        //       "Quantize to FP8 E4M3 with E8M0 block scales using cuBLAS tiled layout",
+        //       nb::arg("input"), nb::arg("output"), nb::arg("block_scales"),
+        //       nb::arg("pad_32x") = false, nb::arg("stream_ptr"));
+
+        // m.def("svdquant_quantize_w4a4", &svdquant_quantize_w4a4,
+        //       "SVDQuant W4A4: smooth + int4 quantize (LoRA-down is external). "
+        //       "act_unsigned selects scale=max/15 + clamp [0,15] for u4 MMA downstream; "
+        //       "caller must pre-shift x to be non-negative before calling (model-level concern).",
+        //       nb::arg("x"), nb::arg("smooth"), nb::arg("lora_down"), nb::arg("q_x"),
+        //       nb::arg("ascales"), nb::arg("lora_act"), nb::arg("act_unsigned"),
         //       nb::arg("stream_ptr"));
-        //
-        // m.def(
-        //     "svdquant_quantize_w4a4", &svdquant_quantize_w4a4,
-        //     "SVDQuant W4A4: smooth + int4 quantize (LoRA-down is external). "
-        //     "act_unsigned selects scale=max/15 + clamp [0,15] for u4 MMA
-        //     downstream; " "caller must pre-shift x to be non-negative before
-        //     calling (model-level " "concern).", nb::arg("x"), nb::arg("smooth"),
-        //     nb::arg("lora_down"), nb::arg("q_x"), nb::arg("ascales"),
-        //     nb::arg("lora_act"), nb::arg("act_unsigned"), nb::arg("stream_ptr"));
         //
         // m.def("svdquant_scaled_mm_w4a4", &svdquant_scaled_mm_w4a4,
-        //       "SVDQuant W4A4: int4 GEMM with per-group dequant", nb::arg("act"),
-        //       nb::arg("wgt"), nb::arg("ascales"), nb::arg("wscales"),
-        //       nb::arg("lora_act_in"), nb::arg("lora_up"), nb::arg("bias"),
-        //       nb::arg("out"), nb::arg("act_unsigned"), nb::arg("fast_accum"),
-        //       nb::arg("shared_scale"), nb::arg("fuse_lora"),
-        //       nb::arg("stream_ptr"));
+        //       "SVDQuant W4A4: int4 GEMM with per-group dequant", nb::arg("act"), nb::arg("wgt"),
+        //       nb::arg("ascales"), nb::arg("wscales"), nb::arg("lora_act_in"), nb::arg("lora_up"),
+        //       nb::arg("bias"), nb::arg("out"), nb::arg("act_unsigned"), nb::arg("fast_accum"),
+        //       nb::arg("shared_scale"), nb::arg("fuse_lora"), nb::arg("stream_ptr"));
         //
         // m.def("awq_w4a16", &awq_w4a16,
         //       "AWQ W4A16: int4 weight @ fp activation (kitchen-native row-major). "
         //       "Internal M-routing picks gemv (M ≤ 8) vs gemm. bias / LoRA-up are "
         //       "applied externally; this kernel only does the dequant + matmul.",
-        //       nb::arg("x"), nb::arg("qweight"), nb::arg("wscales"),
-        //       nb::arg("wzeros"), nb::arg("out"), nb::arg("group_size"),
-        //       nb::arg("stream_ptr"));
+        //       nb::arg("x"), nb::arg("qweight"), nb::arg("wscales"), nb::arg("wzeros"),
+        //       nb::arg("out"), nb::arg("group_size"), nb::arg("stream_ptr"));
 
         m.def("adaln", &adaln, "Fused AdaLN: layernorm(x) * (1 + scale) + shift", nb::arg("x"),
               nb::arg("scale"), nb::arg("shift"), nb::arg("out"), nb::arg("N"), nb::arg("D"),

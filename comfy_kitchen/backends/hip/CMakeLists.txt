@@ -51,6 +51,7 @@ set(HIP_SOURCES
     ops/per_tensor_quantize.cu
     ops/quantize_nvfp4.cu
     ops/cublas_gemm_nvfp4.cu
+    ops/convrot_w4a4.cu
 )
 
 set_source_files_properties(${CPP_SOURCES} PROPERTIES LANGUAGE CXX)

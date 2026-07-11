@@ -1,11 +1,24 @@
+# import os
+# import rocprofsys
+#
+# # Force the profiler to activate threading hooks inside this subproject context
+# os.environ["ROCPROFSYS_TRACE_THREADS"] = "ON"
+# os.environ["ROCPROFSYS_TRACE_FORKS"] = "ON"
+#
+# # Re-initialize the profiler runtime directly inside the subproject import sequence
+# try:
+#     rocprofsys.initialize()
+# except Exception:
+#     pass
+
 import torch
 
 from .backends import cuda as _cuda_backend  # noqa: F401
-from .backends import hip as _hip_backend
 
 # Import backends to trigger auto-registration
 from .backends import eager as _eager_backend  # noqa: F401
 from .backends import triton as _triton_backend  # noqa: F401
+from .backends import hip as _hip_backend
 from .backends.eager.quantization import DTYPE_TO_CODE
 from .backends.eager.quantization import mm_int8 as _mm_int8
 from .exceptions import (
