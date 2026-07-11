@@ -187,7 +187,7 @@ __device__ __forceinline__ float warp_reduce_max(float v)
 {
         for (int offset = kThreadsPerWarp / 2; offset > 0; offset >>= 1)
         {
-                v = fmaxf(v, __shfl_down_sync(0xffffffffffffffffull, v, offset));
+                v = fmaxf(v, __shfl_down_sync(0x00000000ffffffffull, v, offset));
         }
         return v;
 }
@@ -196,7 +196,7 @@ __device__ __forceinline__ int warp_reduce_sum_i32(int v)
 {
         for (int offset = kThreadsPerWarp / 2; offset > 0; offset >>= 1)
         {
-                v += __shfl_down_sync(0xffffffffffffffffull, v, offset);
+                v += __shfl_down_sync(0x00000000ffffffffull, v, offset);
         }
         return v;
 }

@@ -56,6 +56,8 @@ __all__ = [
     "stochastic_rounding_fp8",
 ]
 
+_DISABLE_CUTLASS_INT8 = True
+COMFY_KITCHEN_DISABLE_CUTLASS = 1
 
 _dll_handle = None
 try:
@@ -198,7 +200,7 @@ def _cuda_device_supports_native_int4_mma(tensor: torch.Tensor) -> bool:
     # The current ConvRot W4A4 kernel emits m16n8k64 s4 MMA, which is the
     # sm80+ integer MMA shape. Hopper is routed through the INT8 fallback for
     # better behavior with this implementation.
-    return major >= 8
+    return major == 8
 
 
 def _cublas_int8_n_alignment(tensor: torch.Tensor) -> int:
@@ -1103,32 +1105,41 @@ def convrot_w4a4_linear(
         else:
             h = _build_hadamard(convrot_groupsize, device=x2d.device, dtype=x2d.dtype)
             qact_int8, x_scale = quantize_and_rotate_rowwise(x2d, h, convrot_groupsize)
-        if _cuda_device_is_turing(qact_int8.get_device()):
-            qweight_int8 = prepare_int4_weight_for_int8_linear(qweight.contiguous())
-            out = _int4_linear_via_int8_values(
-                qact_int8,
-                qweight_int8,
-                x_scale,
-                wscales,
-                bias,
-                x.dtype,
-            )
-            return out.reshape(*orig_shape[:-1], qweight.shape[0])
-        if qact_int8.shape[0] <= _INT4_PACKED_WEIGHT_SMALL_M_MAX and hasattr(
-            _C, "int4_weight_int8_act_gemv_dequant"
-        ):
-            out = _int4_weight_int8_act_gemv_dequant(
-                qact_int8,
-                qweight,
-                x_scale,
-                wscales,
-                bias,
-                x.dtype,
-            )
-            return out.reshape(*orig_shape[:-1], qweight.shape[0])
-        out = _int4_weight_int8_act_gemm_dequant_chunked(
+        # if _cuda_device_is_turing(qact_int8.get_device()):
+        #     qweight_int8 = prepare_int4_weight_for_int8_linear(qweight.contiguous())
+        #     out = _int4_linear_via_int8_values(
+        #         qact_int8,
+        #         qweight_int8,
+        #         x_scale,
+        #         wscales,
+        #         bias,
+        #         x.dtype,
+        #     )
+        #     return out.reshape(*orig_shape[:-1], qweight.shape[0])
+        # if qact_int8.shape[0] <= _INT4_PACKED_WEIGHT_SMALL_M_MAX and hasattr(
+        #     _C, "int4_weight_int8_act_gemv_dequant"
+        # ):
+        #     out = _int4_weight_int8_act_gemv_dequant(
+        #         qact_int8,
+        #         qweight,
+        #         x_scale,
+        #         wscales,
+        #         bias,
+        #         x.dtype,
+        #     )
+        #     return out.reshape(*orig_shape[:-1], qweight.shape[0])
+        # out = _int4_weight_int8_act_gemm_dequant_chunked(
+        #     qact_int8,
+        #     qweight,
+        #     x_scale,
+        #     wscales,
+        #     bias,
+        #     x.dtype,
+        # )
+        qweight_int8 = prepare_int4_weight_for_int8_linear(qweight.contiguous())
+        out = _int4_linear_via_int8_values(
             qact_int8,
-            qweight,
+            qweight_int8,
             x_scale,
             wscales,
             bias,

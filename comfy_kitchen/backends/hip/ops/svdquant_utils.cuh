@@ -63,7 +63,7 @@ __forceinline__ __device__ float warp_absmax(float v, int width = 32)
 #pragma unroll
         for (int offset = width / 2; offset > 0; offset >>= 1)
         {
-                float other = __shfl_xor_sync(0xfffffffffffffffful, v, offset);
+                float other = __shfl_xor_sync(0x00000000fffffffful, v, offset);
                 v = fmaxf(v, other);
         }
         return v;
@@ -75,7 +75,7 @@ __forceinline__ __device__ float warp_sum(float v, int width = 32)
 #pragma unroll
         for (int offset = width / 2; offset > 0; offset >>= 1)
         {
-                v += __shfl_xor_sync(0xfffffffffffffffful, v, offset);
+                v += __shfl_xor_sync(0x00000000fffffffful, v, offset);
         }
         return v;
 }

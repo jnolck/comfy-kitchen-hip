@@ -168,7 +168,7 @@ __device__ __forceinline__ float block_reduce_max(float v, float* warp_smem, flo
 #pragma unroll
         for (int offset = 16; offset > 0; offset >>= 1)
         {
-                v = fmaxf(v, __shfl_down_sync(0xfffffffffffffffful, v, offset));
+                v = fmaxf(v, __shfl_down_sync(0x00000000fffffffful, v, offset));
         }
         if (lane == 0)
         {
@@ -181,7 +181,7 @@ __device__ __forceinline__ float block_reduce_max(float v, float* warp_smem, flo
 #pragma unroll
                 for (int offset = 16; offset > 0; offset >>= 1)
                 {
-                        total = fmaxf(total, __shfl_down_sync(0xfffffffffffffffful, total, offset));
+                        total = fmaxf(total, __shfl_down_sync(0x00000000fffffffful, total, offset));
                 }
                 if (lane == 0)
                 {
@@ -1412,12 +1412,20 @@ __global__ void int4_linear_kernel(const int8_t* __restrict__ act,
 
 __device__ __forceinline__ int pack_int4_weight4_as_int8_word(uint32_t packed01, uint32_t packed23)
 {
-        const uint32_t b0 = static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed01)));
-        const uint32_t b1 =
-            static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed01 >> 4)));
-        const uint32_t b2 = static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed23)));
-        const uint32_t b3 =
-            static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed23 >> 4)));
+        // const uint32_t b0 =
+        // static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed01))); const uint32_t
+        // b1 = static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed01 >> 4))); const
+        // uint32_t b2 = static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed23)));
+        // const uint32_t b3 = static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(packed23
+        // >> 4)));
+        const uint32_t b0 = static_cast<uint8_t>(
+            static_cast<int8_t>(unpack_int4_to_int8(static_cast<int8_t>(packed01), 0)));
+        const uint32_t b1 = static_cast<uint8_t>(
+            static_cast<int8_t>(unpack_int4_to_int8(static_cast<int8_t>(packed01), 1)));
+        const uint32_t b2 = static_cast<uint8_t>(
+            static_cast<int8_t>(unpack_int4_to_int8(static_cast<int8_t>(packed23), 0)));
+        const uint32_t b3 = static_cast<uint8_t>(
+            static_cast<int8_t>(unpack_int4_to_int8(static_cast<int8_t>(packed23), 1)));
         return static_cast<int>(b0 | (b1 << 8) | (b2 << 16) | (b3 << 24));
 }
 
@@ -1455,7 +1463,7 @@ __global__ void int4_weight_int8_act_gemv_dequant_warp_kernel(
 #pragma unroll
         for (int offset = kThreadsPerWarp / 2; offset > 0; offset >>= 1)
         {
-                acc += __shfl_down_sync(0xfffffffffffffffful, acc, offset);
+                acc += __shfl_down_sync(0x00000000fffffffful, acc, offset);
         }
 
         if (lane == 0)
@@ -1502,10 +1510,16 @@ __device__ __forceinline__ uint64_t unpack_int4_u32_to_int8_u64(uint32_t packed)
         for (int i = 0; i < 4; ++i)
         {
                 const uint32_t byte = (packed >> (i * 8)) & 0xffu;
+                // const uint32_t low =
+                //     static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(byte)));
+                // const uint32_t high =
+                //     static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(byte >> 4)));
+                // out |= static_cast<uint64_t>(low | (high << 8)) << (i * 16);
                 const uint32_t low =
-                    static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(byte)));
+                    static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_to_int8(byte, 0)));
                 const uint32_t high =
-                    static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_nibble(byte >> 4)));
+                    static_cast<uint8_t>(static_cast<int8_t>(unpack_int4_to_int8(byte, 1)));
+
                 out |= static_cast<uint64_t>(low | (high << 8)) << (i * 16);
         }
         return out;
@@ -1527,8 +1541,12 @@ __global__ void unpack_int4_to_int8_vec8_kernel(const int8_t* __restrict__ input
         for (int64_t idx = base; idx < total_packed; ++idx)
         {
                 const uint32_t packed = static_cast<uint8_t>(input[idx]);
-                output[idx * 2] = static_cast<int8_t>(unpack_int4_nibble(packed));
-                output[idx * 2 + 1] = static_cast<int8_t>(unpack_int4_nibble(packed >> 4));
+                // output[idx * 2] = static_cast<int8_t>(unpack_int4_nibble(packed));
+                // output[idx * 2 + 1] = static_cast<int8_t>(unpack_int4_nibble(packed >> 4));
+                output[idx * 2] =
+                    unpack_int4_to_int8(static_cast<int8_t>(packed), 0);  // low nibble
+                output[idx * 2 + 1] =
+                    unpack_int4_to_int8(static_cast<int8_t>(packed), 1);  // high nibbl
         }
 }
 

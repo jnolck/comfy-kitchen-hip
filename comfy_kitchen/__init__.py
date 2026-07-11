@@ -1,3 +1,16 @@
+# import os
+# import rocprofsys
+#
+# # Force the profiler to activate threading hooks inside this subproject context
+# os.environ["ROCPROFSYS_TRACE_THREADS"] = "ON"
+# os.environ["ROCPROFSYS_TRACE_FORKS"] = "ON"
+#
+# # Re-initialize the profiler runtime directly inside the subproject import sequence
+# try:
+#     rocprofsys.initialize()
+# except Exception:
+#     pass
+
 import torch
 
 from .backends import cuda as _cuda_backend  # noqa: F401
